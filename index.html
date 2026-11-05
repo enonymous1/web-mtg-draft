@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MTG Draft - Solo Pack Opener</title>
+<meta name="description" content="Open classic Magic draft boosters from any set, sort your pool, and export it. Static site, no account, powered by Scryfall.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <h1>MTG Draft</h1>
+  <p class="tagline">Solo pack opener. Pick a set, open packs, sort the pool, export it.</p>
+</header>
+
+<main>
+  <section class="card" aria-labelledby="setup-heading">
+    <h2 id="setup-heading">Open packs</h2>
+
+    <label for="set-search">Set</label>
+    <input id="set-search" type="search" placeholder="Search sets, e.g. Bloomburrow or blb" autocomplete="off">
+    <select id="set-select" aria-label="Choose a set">
+      <option value="">Loading sets from Scryfall&hellip;</option>
+    </select>
+    <p id="set-info" class="muted" aria-live="polite"></p>
+
+    <fieldset>
+      <legend>Packs</legend>
+      <div class="presets" role="group" aria-label="Pack presets">
+        <button type="button" class="preset" data-packs="1">1 pack</button>
+        <button type="button" class="preset" data-packs="3">3 packs (draft)</button>
+        <button type="button" class="preset" data-packs="6">6 packs (sealed)</button>
+      </div>
+      <label for="pack-count">Custom pack count (1&ndash;36)</label>
+      <input id="pack-count" type="number" min="1" max="36" value="3">
+    </fieldset>
+
+    <label for="seed">Seed <span class="muted">(optional, makes the same packs reproducible)</span></label>
+    <div class="seed-row">
+      <input id="seed" type="text" placeholder="e.g. friday-night" autocomplete="off">
+      <button id="random-seed" type="button">Random seed</button>
+    </div>
+    <p class="muted">Empty seed means truly random. A filled seed means the same set, pack count, and seed always deal the same packs.</p>
+
+    <div class="actions">
+      <button id="open-packs" type="button" class="primary">Open packs</button>
+      <button id="clear-pool" type="button">Clear pool</button>
+      <button id="share-link" type="button">Copy share link</button>
+    </div>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+    <p class="muted">Classic draft pack: 1 rare or mythic (mythic about 1 in 8), 3 uncommons, 10 commons, 1 land. Tokens and bonus sheets are excluded.</p>
+  </section>
+
+  <section id="results" class="card" hidden>
+    <h2>Your pool</h2>
+    <p id="pool-stats" class="stats" aria-live="polite"></p>
+
+    <div class="filters">
+      <label for="filter-query">Search
+        <input id="filter-query" type="search" placeholder="Name, type, or rules text">
+      </label>
+      <label for="filter-rarity">Rarity
+        <select id="filter-rarity">
+          <option value="">All rarities</option>
+          <option value="mythic">Mythic</option>
+          <option value="rare">Rare</option>
+          <option value="uncommon">Uncommon</option>
+          <option value="common">Common</option>
+        </select>
+      </label>
+      <label for="filter-color">Color
+        <select id="filter-color">
+          <option value="">All colors</option>
+          <option value="W">White</option>
+          <option value="U">Blue</option>
+          <option value="B">Black</option>
+          <option value="R">Red</option>
+          <option value="G">Green</option>
+          <option value="M">Multicolor</option>
+          <option value="C">Colorless</option>
+        </select>
+      </label>
+      <label for="filter-type">Type
+        <select id="filter-type">
+          <option value="">All types</option>
+          <option value="Creature">Creature</option>
+          <option value="Instant">Instant</option>
+          <option value="Sorcery">Sorcery</option>
+          <option value="Enchantment">Enchantment</option>
+          <option value="Artifact">Artifact</option>
+          <option value="Planeswalker">Planeswalker</option>
+          <option value="Land">Land</option>
+        </select>
+      </label>
+      <label for="sort-select">Sort by
+        <select id="sort-select">
+          <option value="pack">Pack order</option>
+          <option value="name">Name</option>
+          <option value="rarity">Rarity</option>
+          <option value="cmc">Mana value</option>
+          <option value="color">Color</option>
+          <option value="type">Type</option>
+          <option value="price">Price (high to low)</option>
+          <option value="number">Collector number</option>
+        </select>
+      </label>
+      <label for="view-select">View
+        <select id="view-select">
+          <option value="grid">Card images</option>
+          <option value="list">List</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="actions">
+      <button id="copy-decklist" type="button">Copy decklist</button>
+      <button id="download-txt" type="button">Download .txt</button>
+      <button id="download-csv" type="button">Download .csv</button>
+      <button id="download-json" type="button">Download .json</button>
+    </div>
+    <p class="muted">Decklist format is one line per card: count, then name. The CSV and JSON carry set, collector number, rarity, type, mana value, colors, and price.</p>
+
+    <div id="pool-grid" class="grid" aria-live="polite"></div>
+    <p id="empty-note" class="muted" hidden>No cards match these filters.</p>
+  </section>
+
+  <section class="card">
+    <h2>How packs are built</h2>
+    <ul>
+      <li>The set's card pool is fetched once from Scryfall, then cached in your browser for 24 hours. Scryfall asks for at most 2 card requests per second, so the first load of a set takes a few seconds while pages load.</li>
+      <li>Each pack is dealt without replacement from that pool, so no card repeats inside one pack. Copies can repeat across packs, as in real sealed.</li>
+      <li>Sorting and filtering happen locally on the cards you already have. No new request is made when you change a sort or filter.</li>
+    </ul>
+  </section>
+</main>
+
+<dialog id="card-dialog">
+  <form method="dialog">
+    <button type="submit" class="dialog-close" aria-label="Close">Close</button>
+  </form>
+  <div id="card-detail"></div>
+</dialog>
+
+<footer>
+  <p>Unofficial fan project, not affiliated with or endorsed by Wizards of the Coast. Card data and images from <a href="https://scryfall.com/">Scryfall</a>. Magic: The Gathering is a trademark of Wizards of the Coast.</p>
+  <p class="muted">No account, no uploads. Your pool and seed never leave this browser except when you copy a share link or download an export.</p>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
