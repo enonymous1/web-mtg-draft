@@ -66,6 +66,14 @@ URL hash. An empty seed means truly random.
   Scryfall's USD price already comes from TCGplayer.
 - Board bulk moves (v1.3.0): add all creatures, or all cards of one
   color, from the pool to the Main Deck in one click.
+- Animations (v1.4.0): pure CSS keyframes, driven by JavaScript —
+  not Java, which does not run in a browser. Pack reveal is a true 3D
+  flip (card back rotates to the card face), cards deal in one by one
+  with a stagger, flipped rares and mythics pulse gold, foils shimmer,
+  pool cards fade in staggered when you sort or change view, a dragged
+  board card lifts and tilts, the drop zone pulses, and a card you just
+  moved pops into its new column. `prefers-reduced-motion` turns all
+  of it off.
 - Export: copy a decklist (`count name` per line), or download
   `.txt` (count, name, set, collector number), `.csv` (count, name,
   set, number, rarity, type, mana value, colors, mana cost, price),

@@ -69,6 +69,7 @@ let ratings = { byName: {}, total: 0, withData: 0, available: false };
 let ratingsNote = "";
 let revealPackIndex = 0;
 let revealedCards = new Set();
+let justMovedIds = new Set();
 
 function setStatus(text) {
   $("status").textContent = text;
@@ -233,7 +234,7 @@ function renderBoard() {
     board[zone].forEach((card, index) => {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "board-card";
+      button.className = `board-card${justMovedIds.has(card.id) ? " just-moved" : ""}`;
       button.draggable = true;
       button.dataset.zone = zone;
       button.dataset.index = String(index);
@@ -244,12 +245,15 @@ function renderBoard() {
         `<span class="meta">${escapeHtml(cardTypeLine(card))} — ${escapeHtml(card.rarity)} — ${card.cmc ?? "?"} mana</span>`;
       button.addEventListener("click", () => showCard(card));
       button.addEventListener("dragstart", (event) => {
+        button.classList.add("dragging");
         event.dataTransfer.setData("text/plain", JSON.stringify({ zone, index }));
         event.dataTransfer.effectAllowed = "move";
       });
+      button.addEventListener("dragend", () => button.classList.remove("dragging"));
       container.append(button);
     });
   }
+  justMovedIds = new Set();
   for (const name of ["Plains", "Island", "Swamp", "Mountain", "Forest"]) {
     $(`land-count-${name}`).textContent = String(board.lands[name] || 0);
   }
@@ -268,8 +272,10 @@ function renderBoard() {
 
 function moveBoardCard(fromZone, index, toZone) {
   if (!board) return;
+  const card = board[fromZone]?.[index];
   const next = moveCard(board, fromZone, toZone, index);
   if (next === board) return;
+  if (card) justMovedIds = new Set([card.id]);
   board = next;
   saveBoard();
   renderBoard();
@@ -406,26 +412,29 @@ function renderReveal() {
   $("reveal-next-pack").textContent = revealPackIndex + 1 === packs.length ? "Show pool" : "Next pack";
   const grid = $("reveal-grid");
   grid.innerHTML = "";
-  for (const card of order) {
+  order.forEach((card, index) => {
     const flipped = revealedCards.has(card.id);
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `pool-card reveal-card${flipped ? " flipped" : ""}${card.foil ? " foil" : ""}`;
+    // True 3D flip: back face is the card back, front face is the card.
+    // deal-in staggers each card in; rare/mythic cards glow when flipped.
+    const isRare = card.rarity === "rare" || card.rarity === "mythic";
+    button.className = `pool-card reveal-card dealt${flipped ? " flipped" : ""}${card.foil ? " foil" : ""}${flipped && isRare ? " rare-glow" : ""}`;
+    button.style.animationDelay = `${index * 80}ms`;
     const image = cardImage(card, "normal");
     button.innerHTML =
-      `<figure style="margin:0">` +
-      (flipped
-        ? (image ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(card.name)}" loading="lazy">` : `<div>No image available</div>`)
-        : `<img src="${escapeHtml(TTS_CARD_BACK_URL)}" alt="Face-down card" loading="lazy">`) +
-      `<figcaption><span class="name">${flipped ? escapeHtml(card.name) : "???"}</span>` +
-      (flipped ? `<span class="badge ${escapeHtml(card.rarity)}">${escapeHtml(card.rarity)}</span>${card.foil ? ` <span class="badge foil">Foil</span>` : ""}` : "") +
-      `</figcaption></figure>`;
+      `<span class="flip-inner">` +
+      `<span class="flip-face flip-back"><img src="${escapeHtml(TTS_CARD_BACK_URL)}" alt="Face-down card" loading="lazy"></span>` +
+      `<span class="flip-face flip-front">${image ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(card.name)}" loading="lazy">` : `<span>No image available</span>`}</span>` +
+      `</span>` +
+      `<span class="name">${flipped ? escapeHtml(card.name) : "???"}</span>` +
+      (flipped ? ` <span class="badge ${escapeHtml(card.rarity)}">${escapeHtml(card.rarity)}</span>${card.foil ? ` <span class="badge foil">Foil</span>` : ""}` : "");
     button.addEventListener("click", () => {
       revealedCards.add(card.id);
       renderReveal();
     });
     grid.append(button);
-  }
+  });
 }
 
 function revealNextCard() {
@@ -498,10 +507,11 @@ function renderPool() {
   const container = $("pool-grid");
   container.innerHTML = "";
   container.className = $("view-select").value === "list" ? "pool-list" : "grid";
-  const makeCardButton = (card) => {
+  const makeCardButton = (card, index = 0) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `pool-card${card.foil ? " foil" : ""}`;
+    button.className = `pool-card anim-in${card.foil ? " foil" : ""}`;
+    button.style.animationDelay = `${(index % 15) * 30}ms`;
     button.dataset.cardId = card.id;
     if ($("view-select").value === "list") {
       button.innerHTML =
@@ -523,16 +533,17 @@ function renderPool() {
   };
 
   if ($("view-select").value === "groups") {
+    let index = 0;
     for (const group of groupPoolByColor(visible)) {
       const heading = document.createElement("h3");
       heading.className = "group-heading";
       heading.textContent = `${group.label} (${group.cards.length})`;
       container.append(heading);
-      for (const card of group.cards) container.append(makeCardButton(card));
+      for (const card of group.cards) container.append(makeCardButton(card, index++));
     }
     return;
   }
-  for (const card of visible) container.append(makeCardButton(card));
+  visible.forEach((card, index) => container.append(makeCardButton(card, index)));
 }
 
 function showCard(card) {
@@ -711,11 +722,13 @@ $("board-reset").addEventListener("click", () => {
 });
 $("bulk-creatures").addEventListener("click", () => {
   if (!board) return;
+  const moving = board.pool.filter((card) => cardTypeLine(card).includes("Creature"));
   const next = moveAll(board, "pool", "main", (card) => cardTypeLine(card).includes("Creature"));
   if (next === board) {
     setStatus("No creatures left in the pool.");
     return;
   }
+  justMovedIds = new Set(moving.map((card) => card.id));
   board = next;
   saveBoard();
   renderBoard();
@@ -724,11 +737,13 @@ $("bulk-creatures").addEventListener("click", () => {
 $("bulk-color-add").addEventListener("click", () => {
   if (!board) return;
   const color = $("bulk-color").value;
+  const moving = board.pool.filter((card) => cardColors(card).includes(color));
   const next = moveAll(board, "pool", "main", (card) => cardColors(card).includes(color));
   if (next === board) {
     setStatus(`No ${color} cards left in the pool.`);
     return;
   }
+  justMovedIds = new Set(moving.map((card) => card.id));
   board = next;
   saveBoard();
   renderBoard();

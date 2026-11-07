@@ -109,9 +109,19 @@ class TestStaticSite(unittest.TestCase):
         self.assertIn("renderReveal", app)
         self.assertIn("groupPoolByColor", app)
         self.assertIn("renderBoard", app)
+        self.assertIn("flip-inner", app)
+        self.assertIn("justMovedIds", app)
+        self.assertIn("anim-in", app)
         self.assertIn("boardDecklist", app)
         self.assertIn("serviceWorker", app)
         self.assertIn("sw.js", app)
+
+    def test_animations_are_css_keyframes_with_reduced_motion(self):
+        css = (ROOT / "styles.css").read_text(encoding="utf-8")
+        for keyframe in ("deal-in", "fade-in", "pop-in", "rare-glow", "foil-shimmer", "drag-pulse"):
+            self.assertIn(f"@keyframes {keyframe}", css, keyframe)
+        self.assertIn("prefers-reduced-motion", css)
+        self.assertIn("rotateY(180deg)", css)
 
 
 if __name__ == "__main__":

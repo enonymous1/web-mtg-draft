@@ -151,7 +151,9 @@ footer { color: var(--muted); font-size: 0.9rem; }
 }
 .badge.foil {
   background: linear-gradient(45deg, #b8860b, #ffd700, #b8860b);
+  background-size: 200% 100%;
   color: #1a1a1a;
+  animation: foil-shimmer 2s linear infinite;
 }
 .pool-card.foil, .board-card.foil {
   outline: 2px solid #d4af37;
@@ -161,6 +163,61 @@ footer { color: var(--muted); font-size: 0.9rem; }
   grid-column: 1 / -1;
   margin: 1rem 0 0.25rem;
 }
-.reveal-card img {
-  transition: transform 0.25s ease;
+
+/* v1.4.0: CSS + JavaScript animations for opening and organizing.
+   Pure CSS keyframes, driven by JavaScript adding/removing classes and
+   per-card animation delays. No Java, no libraries, no external assets. */
+@keyframes deal-in {
+  from { opacity: 0; transform: translateY(-24px) scale(0.9) rotate(-3deg); }
+  to { opacity: 1; transform: translateY(0) scale(1) rotate(0deg); }
+}
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pop-in {
+  0% { transform: scale(0.9); }
+  60% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+@keyframes rare-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(212, 175, 55, 0); }
+  50% { box-shadow: 0 0 24px 6px rgba(212, 175, 55, 0.65); }
+}
+@keyframes foil-shimmer {
+  from { background-position: 0% 0; }
+  to { background-position: 200% 0; }
+}
+@keyframes drag-pulse {
+  0%, 100% { outline-color: var(--accent); }
+  50% { outline-color: #d4af37; }
+}
+button:active { transform: scale(0.97); }
+/* True 3D flip for pack reveal: the card is a button with a flip-inner
+   holding a back face (card back) and a front face (the card). Flipping
+   adds .flipped, which rotates the inner container 180 degrees. */
+.reveal-card { perspective: 800px; }
+.reveal-card .flip-inner {
+  position: relative;
+  aspect-ratio: 63 / 88;
+  transform-style: preserve-3d;
+  transition: transform 0.55s ease;
+}
+.reveal-card.flipped .flip-inner { transform: rotateY(180deg); }
+.reveal-card .flip-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.reveal-card .flip-face img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; display: block; }
+.reveal-card .flip-front { transform: rotateY(180deg); }
+.reveal-card.dealt { animation: deal-in 0.4s ease both; }
+.reveal-card.flipped.rare-glow .flip-inner { animation: rare-glow 1.2s ease 2; }
+.pool-card.anim-in { animation: fade-in 0.3s ease both; }
+.board-card.just-moved { animation: pop-in 0.35s ease; }
+.board-zone.drag-over { animation: drag-pulse 1s ease infinite; }
+.board-card.dragging { opacity: 0.6; transform: scale(0.96) rotate(2deg); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
 }
