@@ -200,6 +200,13 @@ button:active { transform: scale(0.97); }
 /* True 3D flip for pack reveal: the card is a button with a flip-inner
    holding a back face (card back) and a front face (the card). Flipping
    adds .flipped, which rotates the inner container 180 degrees. */
+#table3d {
+  height: 520px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #143d26;
+  margin-bottom: 1rem;
+}
 .reveal-card { perspective: 800px; }
 .reveal-card .flip-inner {
   position: relative;

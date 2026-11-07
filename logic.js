@@ -155,24 +155,82 @@ export function poolCounts(buckets) {
 // Classic draft booster: 1 rare/mythic, 3 uncommon, 10 common, 1 land.
 // Mythic chance is 1 in 8 on the rare slot. Empty buckets are skipped
 // rather than crashing, so small or landless sets still open.
-export function buildPack(buckets, rng = Math.random) {
+// Play Boosters replaced Draft Boosters with Murders at Karlov Manor
+// (released 2024-02-09). Sets from that date onward get the 14-card
+// Play Booster recipe; earlier sets keep the classic 15-card recipe.
+// Verified against Wizards' published Play Booster structure, the MTG
+// Wiki Play Booster page, and ScrollVault's sealed.js (2026-11-07):
+// 1 rare/mythic (mythic 1 in 7, not 1 in 8), 3 uncommons, 6 commons,
+// 1 common in the List / Special Guest slot (treated as a plain common
+// — no per-set List data is available), 2 wildcards of any rarity
+// (one foil, one non-foil), and 1 basic land.
+export const PLAY_BOOSTER_ERA_START = "2024-02-09";
+
+export function isPlayBoosterEra(releasedAt) {
+  return typeof releasedAt === "string" && releasedAt >= PLAY_BOOSTER_ERA_START;
+}
+
+// Wildcard rarity distribution, same cumulative rates as ScrollVault's
+// WILDCARD_DIST: common 62.5%, uncommon 27.5%, rare 8.75%, mythic 1.25%.
+export function pickWildcardRarity(rng = Math.random) {
+  const r = rng();
+  if (r < 0.625) return "common";
+  if (r < 0.9) return "uncommon";
+  if (r < 0.9875) return "rare";
+  return "mythic";
+}
+
+function takeRareOrMythic(buckets, used, rng, mythicRate) {
+  const mythicAvailable = buckets.mythic.length > 0;
+  const rarePool = rng() < mythicRate && mythicAvailable ? buckets.mythic : buckets.rare;
+  let taken = takeFrom(rarePool, 1, used, rng);
+  if (taken.length === 0 && rarePool === buckets.mythic) {
+    taken = takeFrom(buckets.rare, 1, used, rng);
+  }
+  if (taken.length === 0 && rarePool === buckets.rare) {
+    taken = takeFrom(buckets.mythic, 1, used, rng);
+  }
+  return taken;
+}
+
+export function buildPlayBooster(buckets, rng = Math.random) {
+  const used = new Set();
+  const pack = [];
+  const push = (cards, slot) => {
+    for (const card of cards) pack.push({ ...card, slot });
+  };
+  // Array order is reveal-reversed by the UI (rare last), so the rare
+  // goes first here and the land last.
+  push(takeRareOrMythic(buckets, used, rng, 1 / 7), "rare");
+  for (const foil of [false, true]) {
+    const rarity = pickWildcardRarity(rng);
+    let taken = takeFrom(buckets[rarity] || [], 1, used, rng);
+    if (taken.length === 0) {
+      for (const fallback of ["common", "uncommon", "rare", "mythic"]) {
+        taken = takeFrom(buckets[fallback] || [], 1, used, rng);
+        if (taken.length > 0) break;
+      }
+    }
+    push(taken.map((card) => (foil ? { ...card, foilCopy: true } : card)), "wildcard");
+  }
+  push(takeFrom(buckets.uncommon, 3, used, rng), "uncommon");
+  push(takeFrom(buckets.common, 6, used, rng), "common");
+  push(takeFrom(buckets.common, 1, used, rng), "common");
+  let landTaken = takeFrom(buckets.basicLand, 1, used, rng);
+  if (landTaken.length === 0) landTaken = takeFrom(buckets.commonLand, 1, used, rng);
+  push(landTaken, "land");
+  return pack;
+}
+
+export function buildPack(buckets, rng = Math.random, options = {}) {
+  if (isPlayBoosterEra(options.releasedAt)) return buildPlayBooster(buckets, rng);
   const used = new Set();
   const pack = [];
   const push = (cards, slot) => {
     for (const card of cards) pack.push({ ...card, slot });
   };
 
-  const mythicAvailable = buckets.mythic.length > 0;
-  const rarePool = rng() < 0.125 && mythicAvailable ? buckets.mythic : buckets.rare;
-  let rareTaken = takeFrom(rarePool, 1, used, rng);
-  if (rareTaken.length === 0 && rarePool === buckets.mythic) {
-    rareTaken = takeFrom(buckets.rare, 1, used, rng);
-  }
-  if (rareTaken.length === 0 && rarePool === buckets.rare) {
-    rareTaken = takeFrom(buckets.mythic, 1, used, rng);
-  }
-  push(rareTaken, "rare");
-
+  push(takeRareOrMythic(buckets, used, rng, 0.125), "rare");
   push(takeFrom(buckets.uncommon, 3, used, rng), "uncommon");
   push(takeFrom(buckets.common, 10, used, rng), "common");
 
@@ -184,6 +242,10 @@ export function buildPack(buckets, rng = Math.random) {
 }
 
 // Foil slot, MTGJSON-style approximation: about 1 pack in 3 has a foil,
+// and the foil replaces a common. The marker is `foilCopy`, not `foil`:
+// Scryfall card objects already carry a `foil` boolean meaning "this
+// card is available in foil", which is true for nearly every card, so
+// reusing that name would badge the whole pool as foil.
 // and the foil replaces a common. This is not a per-set MTGJSON booster
 // template (those vary by set and would need the full MTGJSON file), so
 // it is labelled as an approximation in the README.
@@ -191,12 +253,12 @@ export function applyFoil(pack, rng = Math.random) {
   if (rng() >= 1 / 3) return pack;
   const index = pack.map((c) => c.slot).lastIndexOf("common");
   if (index < 0) return pack;
-  return pack.map((card, i) => (i === index ? { ...card, foil: true } : card));
+  return pack.map((card, i) => (i === index ? { ...card, foilCopy: true } : card));
 }
 
-export function buildPacks(buckets, packCount, rng = Math.random) {
+export function buildPacks(buckets, packCount, rng = Math.random, options = {}) {
   const count = Math.max(0, Math.floor(packCount) || 0);
-  return Array.from({ length: count }, () => buildPack(buckets, rng));
+  return Array.from({ length: count }, () => buildPack(buckets, rng, options));
 }
 
 // Flatten packs into one list, keeping pack number and slot per card.

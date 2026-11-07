@@ -66,6 +66,24 @@ URL hash. An empty seed means truly random.
   Scryfall's USD price already comes from TCGplayer.
 - Board bulk moves (v1.3.0): add all creatures, or all cards of one
   color, from the pool to the Main Deck in one click.
+- Play Booster recipe + 3D opening table (v1.6.0): sets released
+  2024-02-09 or later (Murders at Karlov Manor onward) now get real
+  14-card Play Boosters — 1 rare/mythic (mythic 1 in 7), 3 uncommons,
+  7 commons (one in the List / Special Guest slot, treated as a plain
+  common), 2 wildcards of any rarity (one foil, one non-foil;
+  common 62.5% / uncommon 27.5% / rare 8.75% / mythic 1.25%), 1 land.
+  Older sets keep classic 15-card Draft Boosters. Fixed along the way:
+  Scryfall cards carry a `foil` boolean meaning "available in foil"
+  (true for nearly every card), which the app was reading as "this
+  copy is foil" — the Foil badge would have shown on the whole pool;
+  the marker is now `foilCopy`. The Pack reveal step is now a 3D table
+  (three.js 0.182.0, vendored under `assets/vendor/three/` — module
+  shim + core + license, MIT, no CDN, no build step, no physics
+  engine): packs deal onto a felt table, cards fan out face-down, click
+  or Space flips them, rares glow gold when flipped. No WebGL or
+  reduced motion falls back to the 2D grid, which is always built.
+  The 2D pool and deck builder are unchanged — sorting stays 2D.
+  Service worker cache is now `mtg-draft-v3`.
 - Recent sets fixed (v1.5.1): Scryfall stopped setting `booster: true`
   for sets from TMT (Mar 2026) onward — every card in TMT, SOS, MSH,
   HOB, FRA, and TRK is `booster: false`, so the old filter emptied

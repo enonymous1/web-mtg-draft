@@ -38,6 +38,10 @@ class TestStaticSite(unittest.TestCase):
             Path("assets") / "vendor" / "bootstrap.bundle.min.js",
             Path("assets") / "vendor" / "bootstrap-icons.min.css",
             Path("assets") / "vendor" / "THIRD_PARTY_NOTICES.md",
+            Path("assets") / "vendor" / "three" / "three.module.min.js",
+            Path("assets") / "vendor" / "three" / "three.core.min.js",
+            Path("assets") / "vendor" / "three" / "LICENSE",
+            Path("table3d.js"),
         ]
         for rel in required:
             with self.subTest(rel=rel):
@@ -67,15 +71,31 @@ class TestStaticSite(unittest.TestCase):
 
     def test_service_worker_caches_every_shell_file(self):
         sw = (ROOT / "sw.js").read_text(encoding="utf-8")
-        for name in ("index.html", "styles.css", "app.js", "logic.js", "manifest.webmanifest",
+        for name in ("index.html", "styles.css", "app.js", "logic.js", "table3d.js", "manifest.webmanifest",
                      "assets/vendor/adminlte.min.css", "assets/vendor/adminlte.min.js",
-                     "assets/vendor/bootstrap.min.css", "assets/vendor/bootstrap.bundle.min.js"):
+                     "assets/vendor/bootstrap.min.css", "assets/vendor/bootstrap.bundle.min.js",
+                     "assets/vendor/three/three.module.min.js", "assets/vendor/three/three.core.min.js"):
             self.assertIn(name, sw, name)
 
     def test_pages_workflow_deploys_vendor_assets(self):
         workflow = (ROOT / ".github" / "workflows" / "pages.yml").read_text(encoding="utf-8")
         self.assertIn("assets/vendor", workflow)
         self.assertIn("dist/assets/vendor", workflow)
+        self.assertIn("dist/assets/vendor/three", workflow)
+
+    def test_three_module_imports_its_vendored_core(self):
+        # three 0.182.0 ships three.module.min.js as a shim over
+        # three.core.min.js; shipping only the module would break the scene.
+        module = (ROOT / "assets" / "vendor" / "three" / "three.module.min.js").read_text(encoding="utf-8")
+        self.assertIn("./three.core.min.js", module)
+
+    def test_reveal_step_has_the_3d_table_container(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="table3d"', index)
+        app = (ROOT / "app.js").read_text(encoding="utf-8")
+        self.assertIn("createTable", app)
+        self.assertIn("webglSupported", app)
+        self.assertIn("prefersReducedMotion", app)
 
     def test_index_wires_the_opener_controls(self):
         html = (ROOT / "index.html").read_text(encoding="utf-8")

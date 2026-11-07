@@ -34,6 +34,8 @@ jobs:
           cp icons/icon-192.png icons/icon-512.png dist/icons/
           cp assets/vendor/*.css assets/vendor/*.js assets/vendor/*.md dist/assets/vendor/
           cp assets/vendor/fonts/* dist/assets/vendor/fonts/
+          mkdir -p dist/assets/vendor/three
+          cp assets/vendor/three/*.js assets/vendor/three/LICENSE dist/assets/vendor/three/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -1,6 +1,7 @@
 // Browser wiring for the MTG solo pack opener.
 // All pack math lives in logic.js; this file only fetches from Scryfall,
 // caches the pool for 24 hours, renders the pool, and handles exports.
+import { createTable, webglSupported } from "./table3d.js";
 import {
   addBasicLand,
   aggregatePool,
@@ -11,6 +12,7 @@ import {
   boardStatus,
   buildLandPackCards,
   buildPacks,
+  isPlayBoosterEra,
   buildTTSSavedObject,
   cardColors,
   cardImage,
@@ -95,12 +97,41 @@ function updateStepBadges() {
   }
 }
 
+let table3d = null;
+let tablePackIndex = -1;
+const prefersReducedMotion =
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function table3dActive() {
+  return table3d !== null;
+}
+
+function initTable3d() {
+  if (table3d || prefersReducedMotion || !webglSupported()) return;
+  try {
+    table3d = createTable($("table3d"), {
+      onCardClick(id) {
+        if (!revealedCards.has(id)) {
+          revealNextCard();
+          return;
+        }
+        const card = (packs[revealPackIndex] || []).find((c) => c.id === id);
+        if (card) showCard(card);
+      },
+    });
+  } catch {
+    table3d = null;
+  }
+}
+
 function showStep(step) {
   if (STEPS_REQUIRING_POOL.has(step) && flatPool.length === 0) {
     setStatus("Open packs first — that step needs a pool.");
     return false;
   }
   currentStep = step;
+  if (table3d) table3d.setVisible(step === "reveal");
   for (const panel of document.querySelectorAll("[data-step-panel]")) {
     panel.hidden = panel.dataset.stepPanel !== step;
   }
@@ -459,6 +490,26 @@ function renderReveal() {
     `Pack ${revealPackIndex + 1} of ${packs.length} — ${revealedCount} of ${order.length} revealed` +
     (revealPackIndex + 1 === packs.length ? " — last pack" : "");
   $("reveal-next-pack").textContent = revealPackIndex + 1 === packs.length ? "Show pool" : "Next pack";
+  // 3D table when available; the 2D grid stays as the fallback (no WebGL
+  // or reduced motion) and is always built so keyboard flow is identical.
+  if (table3dActive()) {
+    $("table3d").hidden = false;
+    $("reveal-grid").hidden = true;
+    const tableCards = order.map((card) => ({
+      id: card.id,
+      image: cardImage(card, "normal"),
+      rarity: card.rarity,
+    }));
+    if (tablePackIndex !== revealPackIndex) {
+      table3d.setPack(tableCards, revealedCards);
+      tablePackIndex = revealPackIndex;
+    } else {
+      table3d.setRevealed(revealedCards);
+    }
+  } else {
+    $("table3d").hidden = true;
+    $("reveal-grid").hidden = false;
+  }
   const grid = $("reveal-grid");
   grid.innerHTML = "";
   order.forEach((card, index) => {
@@ -468,7 +519,7 @@ function renderReveal() {
     // True 3D flip: back face is the card back, front face is the card.
     // deal-in staggers each card in; rare/mythic cards glow when flipped.
     const isRare = card.rarity === "rare" || card.rarity === "mythic";
-    button.className = `pool-card reveal-card dealt${flipped ? " flipped" : ""}${card.foil ? " foil" : ""}${flipped && isRare ? " rare-glow" : ""}`;
+    button.className = `pool-card reveal-card dealt${flipped ? " flipped" : ""}${card.foilCopy ? " foil" : ""}${flipped && isRare ? " rare-glow" : ""}`;
     button.style.animationDelay = `${index * 80}ms`;
     const image = cardImage(card, "normal");
     button.innerHTML =
@@ -477,7 +528,7 @@ function renderReveal() {
       `<span class="flip-face flip-front">${image ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(card.name)}" loading="lazy">` : `<span>No image available</span>`}</span>` +
       `</span>` +
       `<span class="name">${flipped ? escapeHtml(card.name) : "???"}</span>` +
-      (flipped ? ` <span class="badge ${escapeHtml(card.rarity)}">${escapeHtml(card.rarity)}</span>${card.foil ? ` <span class="badge foil">Foil</span>` : ""}` : "");
+      (flipped ? ` <span class="badge ${escapeHtml(card.rarity)}">${escapeHtml(card.rarity)}</span>${card.foilCopy ? ` <span class="badge foil">Foil</span>` : ""}` : "");
     button.addEventListener("click", () => {
       revealedCards.add(card.id);
       renderReveal();
@@ -509,6 +560,7 @@ function nextPack() {
 
 function finishReveal() {
   $("pack-reveal").hidden = true;
+  tablePackIndex = -1;
   renderPool();
   renderBoard();
   showStep("pool");
@@ -559,7 +611,7 @@ function renderPool() {
   const makeCardButton = (card, index = 0) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `pool-card anim-in${card.foil ? " foil" : ""}`;
+    button.className = `pool-card anim-in${card.foilCopy ? " foil" : ""}`;
     button.style.animationDelay = `${(index % 15) * 30}ms`;
     button.dataset.cardId = card.id;
     if ($("view-select").value === "list") {
@@ -575,7 +627,7 @@ function renderPool() {
           : `<div>No image available</div>`) +
         `<figcaption><span class="name">${escapeHtml(card.name)}</span>` +
         `<span class="meta">Pack ${card.packIndex} - ${escapeHtml(cardTypeLine(card))}</span> ` +
-        `<span class="badge ${escapeHtml(card.rarity)}">${escapeHtml(card.rarity)}</span>${card.foil ? ` <span class="badge foil">Foil</span>` : ""}${ratingBadge(card)}</figcaption></figure>`;
+        `<span class="badge ${escapeHtml(card.rarity)}">${escapeHtml(card.rarity)}</span>${card.foilCopy ? ` <span class="badge foil">Foil</span>` : ""}${ratingBadge(card)}</figcaption></figure>`;
     }
     button.addEventListener("click", () => showCard(card));
     return button;
@@ -672,7 +724,7 @@ async function openPacks() {
     tokenCards = [];
     tokenCacheCode = "";
     buckets = partitionPool(cards);
-    packs = buildPacks(buckets, packCount, currentRng());
+    packs = buildPacks(buckets, packCount, currentRng(), { releasedAt: currentSet?.releasedAt });
     flatPool = flattenPacks(packs);
     boardMeta = { set: code.toLowerCase(), packs: packCount, seed: $("seed").value.trim() };
     board = loadBoard() || createBoard(flatPool);
@@ -682,8 +734,9 @@ async function openPacks() {
     }
     const counts = poolCounts(buckets);
     window.location.hash = encodeShare({ set: code, packs: packCount, seed: $("seed").value.trim() });
+    const packKind = isPlayBoosterEra(currentSet?.releasedAt) ? "14-card Play Boosters" : "15-card Draft Boosters";
     setStatus(
-      `Opened ${packCount} pack${packCount === 1 ? "" : "s"} from ${currentSet ? currentSet.name : code.toUpperCase()} ` +
+      `Opened ${packCount} ${packKind} from ${currentSet ? currentSet.name : code.toUpperCase()} ` +
       `(${fromCache ? "pool loaded from your 24-hour cache" : "pool fetched from Scryfall and cached for 24 hours"}; ` +
       `pool: ${counts.mythic} mythic, ${counts.rare} rare, ${counts.uncommon} uncommon, ${counts.common} common, ${counts.basicLand} basic lands).`,
     );
@@ -701,6 +754,10 @@ async function openPacks() {
 }
 
 // --- Wiring ------------------------------------------------------------
+// 3D opening table, created once at startup when WebGL is available.
+// Any failure (or reduced motion) leaves table3d null and the 2D grid
+// is used for the whole session.
+initTable3d();
 // AdminLTE step panels: sidebar links and Next/Back buttons move between
 // steps; steps that need a pool stay locked until packs are opened.
 for (const link of document.querySelectorAll(".step-link")) {

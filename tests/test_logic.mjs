@@ -13,6 +13,8 @@ import {
   buildLandPackCards,
   buildPack,
   buildPacks,
+  buildPlayBooster,
+  isPlayBoosterEra,
   buildTTSSavedObject,
   cardImage,
   cardPrice,
@@ -159,6 +161,54 @@ test("buildPack falls back to a common land when there are no basics", () => {
   b.basicLand = [];
   const pack = buildPack(b, mulberry32(3));
   assert.equal(pack.find((c) => c.slot === "land").name, "Common Land");
+});
+
+test("isPlayBoosterEra starts with Murders at Karlov Manor, 2024-02-09", () => {
+  assert.equal(isPlayBoosterEra("2024-02-09"), true);
+  assert.equal(isPlayBoosterEra("2024-02-08"), false);
+  assert.equal(isPlayBoosterEra("2026-10-02"), true);
+  assert.equal(isPlayBoosterEra(undefined), false);
+  assert.equal(isPlayBoosterEra(""), false);
+});
+
+test("buildPack deals a 14-card Play Booster for Play era sets", () => {
+  const pack = buildPack(buckets(), mulberry32(7), { releasedAt: "2026-10-02" });
+  assert.equal(pack.length, 14);
+  assert.equal(pack.filter((c) => c.slot === "rare").length, 1);
+  assert.equal(pack.filter((c) => c.slot === "uncommon").length, 3);
+  assert.equal(pack.filter((c) => c.slot === "common").length, 7);
+  assert.equal(pack.filter((c) => c.slot === "wildcard").length, 2);
+  assert.equal(pack.filter((c) => c.slot === "land").length, 1);
+  assert.equal(pack.filter((c) => c.foilCopy).length, 1);
+  assert.equal(pack.find((c) => c.foilCopy).slot, "wildcard");
+  assert.equal(new Set(pack.map((c) => c.id)).size, 14);
+});
+
+test("buildPack stays classic 15-card for pre-Play era sets", () => {
+  const pack = buildPack(buckets(), mulberry32(7), { releasedAt: "2023-09-08" });
+  assert.equal(pack.length, 15);
+  assert.equal(pack.filter((c) => c.slot === "wildcard").length, 0);
+});
+
+test("Play Booster picks mythic when the first random draw is under 1 in 7", () => {
+  const pack = buildPlayBooster(buckets(), () => 0.01);
+  assert.equal(pack.find((c) => c.slot === "rare").rarity, "mythic");
+  const rarePack = buildPlayBooster(buckets(), () => 0.5);
+  assert.equal(rarePack.find((c) => c.slot === "rare").rarity, "rare");
+});
+
+test("Scryfall foil availability is not a foil copy", () => {
+  // Live Scryfall cards carry foil: true meaning "available in foil".
+  // The app's foil badge must read foilCopy, not foil, or the whole
+  // pool would badge as foil.
+  const b = buckets();
+  for (const bucket of Object.values(b)) {
+    for (const c of bucket) c.foil = true;
+  }
+  const pack = buildPlayBooster(b, mulberry32(7));
+  assert.equal(pack.filter((c) => c.foilCopy).length, 1);
+  const classic = buildPack(b, mulberry32(7), { releasedAt: "2023-09-08" });
+  assert.equal(classic.filter((c) => c.foilCopy).length <= 1, true);
 });
 
 test("buildPacks with the same seed deal the same packs", () => {
@@ -492,8 +542,8 @@ test("applyFoil replaces a common about 1 in 3 packs, never changes pack size", 
   assert.equal(pack.length, 15);
   const foiled = applyFoil(pack, () => 0.0);
   assert.equal(foiled.length, 15);
-  assert.equal(foiled.filter((c) => c.foil).length, 1);
-  assert.equal(foiled.find((c) => c.foil).slot, "common");
+  assert.equal(foiled.filter((c) => c.foilCopy).length, 1);
+  assert.equal(foiled.find((c) => c.foilCopy).slot, "common");
   assert.equal(applyFoil(pack, () => 0.99), pack);
   assert.equal(applyFoil(pack.filter((c) => c.slot !== "common"), () => 0.0).length, pack.filter((c) => c.slot !== "common").length);
 });
