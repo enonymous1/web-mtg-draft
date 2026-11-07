@@ -89,6 +89,40 @@ class TestStaticSite(unittest.TestCase):
         module = (ROOT / "assets" / "vendor" / "three" / "three.module.min.js").read_text(encoding="utf-8")
         self.assertIn("./three.core.min.js", module)
 
+    def test_review_fixes_are_present(self):
+        # Staff review v1.7.0: named Scryfall constants, one rate-limit
+        # error helper, one cardBadges helper, no duplicated badge string.
+        app = (ROOT / "app.js").read_text(encoding="utf-8")
+        for name in ("SCRYFALL_REQUEST_GAP_MS", "SCRYFALL_PAGE_SIZE",
+                     "SCRYFALL_COLLECTION_BATCH_SIZE", "rateLimitError", "cardBadges"):
+            self.assertIn(name, app, name)
+        self.assertNotIn("sleep(550)", app)
+        self.assertNotIn("i + 70", app)
+        # table3d disposes GPU resources on pack change (the v1.6.0 leak).
+        table3d = (ROOT / "table3d.js").read_text(encoding="utf-8")
+        self.assertIn("disposeCard(entry)", table3d)
+        self.assertIn("cardGeometry.dispose()", table3d)
+        # Dark theme variables live in one place only: no separate
+        # prefers-color-scheme media block duplicating them.
+        styles = (ROOT / "styles.css").read_text(encoding="utf-8")
+        self.assertNotIn("@media (prefers-color-scheme", styles)
+        self.assertIn(".set-icon", styles)
+        # logic.js exports carry JSDoc.
+        logic = (ROOT / "logic.js").read_text(encoding="utf-8")
+        exports = re.findall(r"export function (\w+)", logic)
+        for name in exports:
+            self.assertRegex(logic, re.compile(r"/\*\*.*?@param.*?\*/\s*export function " + name, re.S), name)
+
+    def test_readme_has_the_required_sections(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        for heading in ("## Description", "## Prerequisites", "## Installation",
+                        "## Local Development", "## Deployment", "## How it works",
+                        "## Changelog", "## Visual assets"):
+            self.assertIn(heading, readme, heading)
+        # No stale claims: Play Boosters are modelled since v1.6.0.
+        self.assertNotIn("are not modelled yet", readme)
+        self.assertNotIn("still deals classic 15-card packs for every set", readme)
+
     def test_reveal_step_has_the_3d_table_container(self):
         index = (ROOT / "index.html").read_text(encoding="utf-8")
         self.assertIn('id="table3d"', index)

@@ -1,6 +1,6 @@
 // Offline shell for MTG Draft. Card data and images still come from
 // Scryfall at runtime; only the app shell is cached here.
-const CACHE = "mtg-draft-v3";
+const CACHE = "mtg-draft-v4";
 const SHELL = [
   "index.html",
   "styles.css",

@@ -5,6 +5,9 @@
 
 // --- Seeded randomness -------------------------------------------------
 // FNV-1a hash: turns any seed string into a stable 32-bit integer.
+/** Hash a seed string to a stable 32-bit integer (FNV-1a).
+ * @param {unknown} text - Seed text; anything stringifiable.
+ * @returns {number} Unsigned 32-bit hash. Same input, same output. */
 export function hashSeed(text) {
   let hash = 0x811c9dc5;
   for (const ch of String(text)) {
@@ -15,6 +18,9 @@ export function hashSeed(text) {
 }
 
 // mulberry32: small, fast, deterministic PRNG. Same seed, same sequence.
+/** Deterministic PRNG (mulberry32) seeded from a 32-bit integer.
+ * @param {number} seed - Unsigned 32-bit seed.
+ * @returns {() => number} Next random in [0, 1). Same seed, same sequence. */
 export function mulberry32(seed) {
   let state = seed >>> 0;
   return function next() {
@@ -27,6 +33,11 @@ export function mulberry32(seed) {
 }
 
 // Fisher-Yates shuffle. Returns a new array, never mutates the input.
+/** Fisher-Yates shuffle. Returns a new array; the input is never mutated.
+ * @template T
+ * @param {T[]} items - Items to shuffle.
+ * @param {() => number} [rng=Math.random] - Random source in [0, 1).
+ * @returns {T[]} Shuffled copy. */
 export function shuffle(items, rng = Math.random) {
   const out = [...items];
   for (let i = out.length - 1; i > 0; i -= 1) {
@@ -38,6 +49,14 @@ export function shuffle(items, rng = Math.random) {
 
 // Sample up to `count` items without replacement, skipping ids in `used`.
 // If the bucket is smaller than count, returns the whole shuffled bucket.
+/** Sample up to `count` items from a bucket without replacement, skipping ids in `used`.
+ * Taken ids are added to `used`, so successive calls never repeat a card.
+ * @template T
+ * @param {T[]} bucket - Cards to sample from.
+ * @param {number} count - How many to take.
+ * @param {Set<string>} used - Ids already taken (mutated).
+ * @param {() => number} [rng=Math.random] - Random source in [0, 1).
+ * @returns {T[]} Taken cards; fewer than `count` when the bucket runs out. */
 export function takeFrom(bucket, count, used, rng = Math.random) {
   const available = shuffle(
     bucket.filter((card) => !used.has(card.id)),
@@ -51,34 +70,56 @@ export function takeFrom(bucket, count, used, rng = Math.random) {
 // --- Card field helpers ------------------------------------------------
 // Scryfall puts image/text fields on the card for single-face cards and
 // on card_faces[0] for double-face cards. These helpers hide that split.
+/** A card's type line, hiding the single-face / double-face split.
+ * @param {object} card - Scryfall card object.
+ * @returns {string} Type line, or "" when absent. */
 export function cardTypeLine(card) {
   return card.type_line || card.card_faces?.[0]?.type_line || "";
 }
 
+/** A card's image URL for a size, hiding the single-face / double-face split.
+ * @param {object} card - Scryfall card object.
+ * @param {string} [size="normal"] - Scryfall image size (e.g. "small", "normal", "large").
+ * @returns {string} Image URL, or "" when the card has no image. */
 export function cardImage(card, size = "normal") {
   if (card.image_uris?.[size]) return card.image_uris[size];
   const face = card.card_faces?.find((f) => f.image_uris?.[size]);
   return face ? face.image_uris[size] : "";
 }
 
+/** A card's oracle text, joining both faces for double-faced cards.
+ * @param {object} card - Scryfall card object.
+ * @returns {string} Oracle text, or "" when absent. */
 export function cardOracleText(card) {
   return card.oracle_text || card.card_faces?.map((f) => f.oracle_text || "").join("\n---\n") || "";
 }
 
+/** A card's mana cost (front face for double-faced cards).
+ * @param {object} card - Scryfall card object.
+ * @returns {string} Mana cost, or "" when absent. */
 export function cardManaCost(card) {
   return card.mana_cost || card.card_faces?.[0]?.mana_cost || "";
 }
 
+/** A card's colors (front face for double-faced cards).
+ * @param {object} card - Scryfall card object.
+ * @returns {string[]} Color letters (e.g. ["U"]), or [] when colorless. */
 export function cardColors(card) {
   return card.colors || card.card_faces?.[0]?.colors || [];
 }
 
+/** A card's Scryfall USD price.
+ * @param {object} card - Scryfall card object.
+ * @returns {number|null} Price in USD, or null when unlisted. */
 export function cardPrice(card) {
   const raw = card.prices?.usd;
   const value = raw === null || raw === undefined ? NaN : Number.parseFloat(raw);
   return Number.isFinite(value) ? value : null;
 }
 
+/** Whether a card is a basic land, by type line.
+ * @param {object} card - Scryfall card object.
+ * @returns {boolean} True for basic lands. */
 export function isBasicLand(card) {
   const type = cardTypeLine(card);
   return type.includes("Basic") && type.includes("Land");
@@ -90,10 +131,28 @@ export function isBasicLand(card) {
 // Rules, in order:
 //  - Skip tokens, emblems, and art-series style extras.
 //  - Skip bonus/special sheets: v1 models classic draft boosters only.
-//  - Skip printings Scryfall flags as not appearing in boosters, when
-//    that flag is present. Basic lands still pass: theirs is true.
+//  - Skip printings Scryfall flags as not appearing in boosters, but
+//    only when that flag is meaningful for the set (see the
+//    BOOSTER_FLAG_MIN_SHARE rule below): for sets from TMT (Mar 2026)
+//    onward every card is booster === false, so applying the flag
+//    there would empty the whole pool.
 //  - Deduplicate by name + rarity, so three arts of one common do not
 //    triple its weight and cannot appear twice in one pack.
+// The `booster` flag is applied only when at least this share of a set's
+// otherwise eligible cards carry it. Below it, the flag is meaningless
+// for that set (Scryfall stopped setting it for sets from TMT onward)
+// and applying it would empty the whole pool.
+export const BOOSTER_FLAG_MIN_SHARE = 0.1;
+
+/** Split raw Scryfall printings for one set into rarity buckets.
+ * Skips tokens, emblems, and bonus/special sheets; dedupes by name +
+ * rarity so three arts of one common do not triple its weight.
+ * The `booster` flag is applied only when at least 10% of otherwise
+ * eligible cards carry it (see BOOSTER_FLAG_MIN_SHARE): Scryfall
+ * stopped setting it for sets from TMT (Mar 2026) onward, where
+ * applying it would empty the whole pool.
+ * @param {object[]} cards - Raw Scryfall printings (`unique=prints`).
+ * @returns {{common: object[], uncommon: object[], rare: object[], mythic: object[], basicLand: object[], commonLand: object[]}} Buckets. */
 export function partitionPool(cards) {
   const buckets = {
     common: [],
@@ -122,7 +181,7 @@ export function partitionPool(cards) {
   );
   const boosterShare =
     eligible.length === 0 ? 0 : eligible.filter((card) => card.booster === true).length / eligible.length;
-  const useBoosterFlag = boosterShare >= 0.1;
+  const useBoosterFlag = boosterShare >= BOOSTER_FLAG_MIN_SHARE;
   const seen = new Set();
   for (const card of eligible) {
     if (useBoosterFlag && card.booster === false) continue;
@@ -140,6 +199,9 @@ export function partitionPool(cards) {
   return buckets;
 }
 
+/** Card counts per bucket, for status text.
+ * @param {object} buckets - Output of partitionPool.
+ * @returns {{common: number, uncommon: number, rare: number, mythic: number, basicLand: number, commonLand: number}} Counts. */
 export function poolCounts(buckets) {
   return {
     common: buckets.common.length,
@@ -165,13 +227,23 @@ export function poolCounts(buckets) {
 // — no per-set List data is available), 2 wildcards of any rarity
 // (one foil, one non-foil), and 1 basic land.
 export const PLAY_BOOSTER_ERA_START = "2024-02-09";
+// Mythic upgrade rate on the rare slot: 1 in 8 for Draft Boosters,
+// 1 in 7 for Play Boosters (Wizards' published rates).
+export const MYTHIC_RATE_DRAFT = 0.125;
+export const MYTHIC_RATE_PLAY = 1 / 7;
 
+/** Whether a set's release date falls in the Play Booster era (MKM, 2024-02-09, onward).
+ * @param {string} [releasedAt] - ISO release date (`YYYY-MM-DD`).
+ * @returns {boolean} True for Play Booster sets. */
 export function isPlayBoosterEra(releasedAt) {
   return typeof releasedAt === "string" && releasedAt >= PLAY_BOOSTER_ERA_START;
 }
 
 // Wildcard rarity distribution, same cumulative rates as ScrollVault's
 // WILDCARD_DIST: common 62.5%, uncommon 27.5%, rare 8.75%, mythic 1.25%.
+/** Roll a Play Booster wildcard's rarity: common 62.5%, uncommon 27.5%, rare 8.75%, mythic 1.25%.
+ * @param {() => number} [rng=Math.random] - Random source in [0, 1).
+ * @returns {"common"|"uncommon"|"rare"|"mythic"} Wildcard rarity. */
 export function pickWildcardRarity(rng = Math.random) {
   const r = rng();
   if (r < 0.625) return "common";
@@ -193,6 +265,13 @@ function takeRareOrMythic(buckets, used, rng, mythicRate) {
   return taken;
 }
 
+/** Deal one 14-card Play Booster: 1 rare/mythic (mythic 1 in 7), 2 wildcards
+ * (one foil, one non-foil), 3 uncommons, 7 commons, 1 land. No card
+ * repeats inside the pack. Array order is reveal-reversed by the UI
+ * (rare last), so the rare goes first here and the land last.
+ * @param {object} buckets - Output of partitionPool.
+ * @param {() => number} [rng=Math.random] - Random source in [0, 1).
+ * @returns {object[]} Pack of up to 14 cards, each with a `slot` field. */
 export function buildPlayBooster(buckets, rng = Math.random) {
   const used = new Set();
   const pack = [];
@@ -201,7 +280,7 @@ export function buildPlayBooster(buckets, rng = Math.random) {
   };
   // Array order is reveal-reversed by the UI (rare last), so the rare
   // goes first here and the land last.
-  push(takeRareOrMythic(buckets, used, rng, 1 / 7), "rare");
+  push(takeRareOrMythic(buckets, used, rng, MYTHIC_RATE_PLAY), "rare");
   for (const foil of [false, true]) {
     const rarity = pickWildcardRarity(rng);
     let taken = takeFrom(buckets[rarity] || [], 1, used, rng);
@@ -222,6 +301,14 @@ export function buildPlayBooster(buckets, rng = Math.random) {
   return pack;
 }
 
+/** Deal one pack: a Play Booster for Play-era sets, a classic 15-card
+ * Draft Booster (1 rare/mythic at 1 in 8, 3 uncommons, 10 commons,
+ * 1 land, ~1 in 3 packs foil) for earlier sets. No card repeats
+ * inside the pack.
+ * @param {object} buckets - Output of partitionPool.
+ * @param {() => number} [rng=Math.random] - Random source in [0, 1).
+ * @param {{releasedAt?: string}} [options={}] - Set release date; drives the era.
+ * @returns {object[]} Pack, each card with a `slot` field. */
 export function buildPack(buckets, rng = Math.random, options = {}) {
   if (isPlayBoosterEra(options.releasedAt)) return buildPlayBooster(buckets, rng);
   const used = new Set();
@@ -230,7 +317,7 @@ export function buildPack(buckets, rng = Math.random, options = {}) {
     for (const card of cards) pack.push({ ...card, slot });
   };
 
-  push(takeRareOrMythic(buckets, used, rng, 0.125), "rare");
+  push(takeRareOrMythic(buckets, used, rng, MYTHIC_RATE_DRAFT), "rare");
   push(takeFrom(buckets.uncommon, 3, used, rng), "uncommon");
   push(takeFrom(buckets.common, 10, used, rng), "common");
 
@@ -242,13 +329,19 @@ export function buildPack(buckets, rng = Math.random, options = {}) {
 }
 
 // Foil slot, MTGJSON-style approximation: about 1 pack in 3 has a foil,
-// and the foil replaces a common. The marker is `foilCopy`, not `foil`:
-// Scryfall card objects already carry a `foil` boolean meaning "this
-// card is available in foil", which is true for nearly every card, so
-// reusing that name would badge the whole pool as foil.
 // and the foil replaces a common. This is not a per-set MTGJSON booster
 // template (those vary by set and would need the full MTGJSON file), so
-// it is labelled as an approximation in the README.
+// it is labelled as an approximation in the README. The marker is
+// `foilCopy`, not `foil`: Scryfall card objects already carry a `foil`
+// boolean meaning "this card is available in foil", which is true for
+// nearly every card, so reusing that name would badge the whole pool.
+/** Classic-booster foil slot: about 1 pack in 3 has a foil, replacing a
+ * common. The marker is `foilCopy`, not `foil`: Scryfall cards already
+ * carry a `foil` boolean meaning "available in foil" (true for nearly
+ * every card), so reusing that name would badge the whole pool.
+ * @param {object[]} pack - Cards with a `slot` field.
+ * @param {() => number} [rng=Math.random] - Random source in [0, 1).
+ * @returns {object[]} Pack, unchanged when no foil rolls or no common exists. */
 export function applyFoil(pack, rng = Math.random) {
   if (rng() >= 1 / 3) return pack;
   const index = pack.map((c) => c.slot).lastIndexOf("common");
@@ -256,12 +349,21 @@ export function applyFoil(pack, rng = Math.random) {
   return pack.map((card, i) => (i === index ? { ...card, foilCopy: true } : card));
 }
 
+/** Deal `packCount` packs from the same buckets, sharing one RNG stream.
+ * @param {object} buckets - Output of partitionPool.
+ * @param {number} packCount - How many packs to deal.
+ * @param {() => number} [rng=Math.random] - Random source in [0, 1).
+ * @param {{releasedAt?: string}} [options={}] - Set release date; drives the era.
+ * @returns {object[][]} Packs in deal order. */
 export function buildPacks(buckets, packCount, rng = Math.random, options = {}) {
   const count = Math.max(0, Math.floor(packCount) || 0);
   return Array.from({ length: count }, () => buildPack(buckets, rng, options));
 }
 
 // Flatten packs into one list, keeping pack number and slot per card.
+/** Flatten packs into one list, keeping pack number and slot per card.
+ * @param {object[][]} packs - Packs from buildPacks.
+ * @returns {object[]} Cards, each with a `packIndex` (1-based). */
 export function flattenPacks(packs) {
   const flat = [];
   packs.forEach((pack, packIndex) => {
@@ -271,6 +373,9 @@ export function flattenPacks(packs) {
 }
 
 // Group a flat pool by card id, counting copies across packs.
+/** Group a flat pool by card id, counting copies across packs.
+ * @param {object[]} flat - Flat pool from flattenPacks.
+ * @returns {{card: object, count: number, packs: number[]}[]} Aggregated cards, sorted by name. */
 export function aggregatePool(flat) {
   const byId = new Map();
   for (const card of flat) {
@@ -290,6 +395,11 @@ export function aggregatePool(flat) {
 // --- Sorting and filtering --------------------------------------------
 const RARITY_ORDER = { mythic: 0, rare: 1, uncommon: 2, common: 3 };
 
+/** Sort a pool by key. Returns a new array; the input is never mutated.
+ * @param {object[]} cards - Cards to sort.
+ * @param {string} [sortKey="name"] - "name" | "cmc" | "rarity" | "color" | "price" | "pack" | "type" | "number" | "rating".
+ * @param {object} [ratings={}] - 17Lands ratings from parse17LandsRatings (only used for "rating").
+ * @returns {object[]} Sorted copy. */
 export function sortPool(cards, sortKey = "name", ratings = {}) {
   const out = [...cards];
   const byName = (a, b) => a.name.localeCompare(b.name);
@@ -337,6 +447,10 @@ export function sortPool(cards, sortKey = "name", ratings = {}) {
   }
 }
 
+/** Filter a pool by query, rarity, color, and type. All filters are ANDed.
+ * @param {object[]} cards - Cards to filter.
+ * @param {{query?: string, rarity?: string, color?: string, type?: string}} [filters={}] - Query matches name/type/oracle text; color "M" is multicolor, "C" is colorless.
+ * @returns {object[]} Matching cards, in input order. */
 export function filterPool(cards, filters = {}) {
   const query = (filters.query || "").trim().toLowerCase();
   return cards.filter((card) => {
@@ -361,10 +475,16 @@ export function filterPool(cards, filters = {}) {
 }
 
 // --- Export formats ----------------------------------------------------
+/** Format aggregated cards as a decklist: `count name` per line.
+ * @param {{card: object, count: number}[]} aggregated - Output of aggregatePool.
+ * @returns {string} Decklist text. */
 export function formatDecklist(aggregated) {
   return aggregated.map(({ card, count }) => `${count} ${card.name}`).join("\n");
 }
 
+/** Format aggregated cards as a detailed decklist: `count name (set) number` per line.
+ * @param {{card: object, count: number}[]} aggregated - Output of aggregatePool.
+ * @returns {string} Decklist text. */
 export function formatDecklistDetailed(aggregated) {
   return aggregated
     .map(({ card, count }) => `${count} ${card.name} (${card.set}) ${card.collector_number}`)
@@ -376,6 +496,9 @@ function csvEscape(value) {
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
+/** Format aggregated cards as CSV (count, name, set, number, rarity, type, mana value, colors, mana cost, price).
+ * @param {{card: object, count: number}[]} aggregated - Output of aggregatePool.
+ * @returns {string} CSV text with a header row. */
 export function formatCSV(aggregated) {
   const header = [
     "count", "name", "set", "collector_number", "rarity",
@@ -399,6 +522,9 @@ export function formatCSV(aggregated) {
 // --- Share links -------------------------------------------------------
 // The whole draft config fits in the URL hash, so a link reproduces
 // the same packs when the same seed is used.
+/** Encode a draft config (set, packs, seed) into a URL hash, so a link reproduces the same packs.
+ * @param {{set?: string, packs?: number, seed?: string}} config - Draft config.
+ * @returns {string} Hash starting with "#", or "#" when empty. */
 export function encodeShare({ set, packs, seed }) {
   const params = new URLSearchParams();
   if (set) params.set("set", set);
@@ -408,6 +534,9 @@ export function encodeShare({ set, packs, seed }) {
   return query ? `#${query}` : "#";
 }
 
+/** Decode a URL hash produced by encodeShare.
+ * @param {string} hash - Hash with or without the leading "#".
+ * @returns {{set: string, packs: number|null, seed: string}} Draft config; packs is null when absent. */
 export function decodeShare(hash) {
   const clean = String(hash || "").replace(/^#/, "");
   const params = new URLSearchParams(clean);
@@ -426,6 +555,9 @@ export function decodeShare(hash) {
 // sets such as Mystery Booster Commander Edition never appeared.
 export const DRAFTABLE_SET_TYPES = ["expansion", "core", "masters", "draft_innovation"];
 
+/** Keep only draftable set types (expansion, core, masters, draft_innovation), newest first.
+ * @param {object[]} sets - Raw Scryfall /sets list.
+ * @returns {object[]} Draftable sets, sorted by release date descending. */
 export function filterDraftableSets(sets) {
   return (sets || [])
     .filter((s) => DRAFTABLE_SET_TYPES.includes(s.set_type))
@@ -455,6 +587,9 @@ export function filterDraftableSets(sets) {
 export const TTS_CARD_BACK_URL =
   "https://backs.scryfall.io/normal/0/a/0aeebaf5-8c7d-4636-9e82-8c27447861f7.jpg";
 
+/** Whether a card has a back face with its own image (for TTS UniqueBack).
+ * @param {object} card - Scryfall card object.
+ * @returns {boolean} True for double-faced cards with a back image. */
 export function isDoubleFaced(card) {
   return (
     Array.isArray(card.card_faces) &&
@@ -463,11 +598,19 @@ export function isDoubleFaced(card) {
   );
 }
 
+/** A double-faced card's back-face image URL.
+ * @param {object} card - Scryfall card object.
+ * @param {string} [size="normal"] - Scryfall image size.
+ * @returns {string} Back image URL, or "" for single-faced cards. */
 export function cardBackImage(card, size = "normal") {
   if (!isDoubleFaced(card)) return "";
   return card.card_faces[1].image_uris?.[size] || card.card_faces[1].image_uris?.normal || "";
 }
 
+/** Image URL for TTS: direct Scryfall URL, or re-served as JPEG through wsrv.nl when `proxy` is set.
+ * @param {string} url - Scryfall image URL.
+ * @param {{proxy?: boolean}} [options={}] - Use the wsrv.nl JPEG proxy (TTS fails on direct/WebP images).
+ * @returns {string} URL for the TTS file, or "" when the input is empty. */
 export function ttsImageUrl(url, options = {}) {
   if (!url) return "";
   if (options.proxy) {
@@ -478,6 +621,9 @@ export function ttsImageUrl(url, options = {}) {
 
 // Token ids referenced by a pool, from Scryfall all_parts entries with
 // component "token". Callers fetch those ids with POST /cards/collection.
+/** Token card ids referenced by a pool, from Scryfall `all_parts` entries with component "token".
+ * @param {object[]} cards - Pool cards.
+ * @returns {string[]} Unique token ids, for POST /cards/collection. */
 export function collectTokenIds(cards) {
   const ids = new Set();
   for (const card of cards || []) {
@@ -490,6 +636,10 @@ export function collectTokenIds(cards) {
 
 // A land pack for TTS: 4 copies of each basic land in the set, 20 cards
 // when all five are present. Falls back to common non-basic lands.
+/** Land pack for TTS: `perLand` copies of each basic land in the set (20 cards when all five are present).
+ * @param {object} buckets - Output of partitionPool.
+ * @param {number} [perLand=4] - Copies per basic land.
+ * @returns {object[]} Land cards (the same card object repeated). */
 export function buildLandPackCards(buckets, perLand = 4) {
   const sources = buckets.basicLand.length > 0 ? buckets.basicLand : buckets.commonLand;
   const out = [];
@@ -499,6 +649,9 @@ export function buildLandPackCards(buckets, perLand = 4) {
   return out;
 }
 
+/** TTS card description: type line, rarity, set, collector number, price, then oracle text. Capped at 1000 chars.
+ * @param {object} card - Scryfall card object.
+ * @returns {string} Description text. */
 export function ttsDescription(card) {
   const price = cardPrice(card);
   const header =
@@ -576,6 +729,9 @@ function buildTTSDeck(cards, nickname, description, guidSeed, options = {}) {
 // Build a whole Saved Object: a Bag holding the pool deck, plus a token
 // deck and a land-pack deck when those lists are non-empty. Returns the
 // object and counts, so the UI can report what was included and skipped.
+/** Build a Tabletop Simulator Saved Object: a Bag holding the pool deck, plus token and land-pack decks when non-empty.
+ * @param {{setName: string, setCode: string, packs: number, seed: string, pool: object[], tokens?: object[], lands?: object[], options?: object, poolLabel?: string}} args - Set/pack info and the card lists.
+ * @returns {{savedObject: object, skipped: number, deckCount: number, cardCount: number}} Saved Object plus counts; `skipped` is cards with no image. */
 export function buildTTSSavedObject({ setName, setCode, packs, seed, pool, tokens = [], lands = [], options = {}, poolLabel = "Pool" }) {
   const decks = [];
   let skipped = 0;
@@ -654,6 +810,9 @@ export function buildTTSSavedObject({ setName, setCode, packs, seed, pool, token
 export const BOARD_ZONES = ["pool", "main", "sideboard", "maybe"];
 export const BASIC_LAND_NAMES = ["Plains", "Island", "Swamp", "Mountain", "Forest"];
 
+/** Create an empty deck-builder board from a flat pool (pool sorted by mana value).
+ * @param {object[]} flatPool - Flat pool from flattenPacks.
+ * @returns {{pool: object[], main: object[], sideboard: object[], maybe: object[], lands: object}} Board state. */
 export function createBoard(flatPool) {
   return {
     pool: sortPool([...(flatPool || [])], "cmc"),
@@ -664,6 +823,12 @@ export function createBoard(flatPool) {
   };
 }
 
+/** Move one card between board zones. Non-mutating; returns the board unchanged on a bad zone, index, or same-zone move.
+ * @param {object} board - Board state.
+ * @param {string} fromZone - Source zone ("pool" | "main" | "sideboard" | "maybe").
+ * @param {string} toZone - Destination zone.
+ * @param {number} index - Index in the source zone.
+ * @returns {object} New board state. */
 export function moveCard(board, fromZone, toZone, index) {
   if (!BOARD_ZONES.includes(fromZone) || !BOARD_ZONES.includes(toZone)) return board;
   if (fromZone === toZone) return board;
@@ -681,6 +846,10 @@ export function moveCard(board, fromZone, toZone, index) {
   return next;
 }
 
+/** Sort every board zone by key. Non-mutating.
+ * @param {object} board - Board state.
+ * @param {string} [sortKey="cmc"] - Sort key (see sortPool).
+ * @returns {object} New board state. */
 export function sortBoard(board, sortKey = "cmc") {
   return {
     pool: sortPool(board.pool, sortKey),
@@ -691,6 +860,9 @@ export function sortBoard(board, sortKey = "cmc") {
   };
 }
 
+/** Move all board cards back to the pool and clear added lands. Non-mutating.
+ * @param {object} board - Board state.
+ * @returns {object} New board state. */
 export function resetBoard(board) {
   const all = [...board.pool, ...board.main, ...board.sideboard, ...board.maybe];
   return {
@@ -702,6 +874,11 @@ export function resetBoard(board) {
   };
 }
 
+/** Add (or remove, with a negative count) basic lands by name. Clamped to 0–99 per land.
+ * @param {object} board - Board state.
+ * @param {string} name - Basic land name ("Plains" | "Island" | "Swamp" | "Mountain" | "Forest").
+ * @param {number} [count=1] - How many to add (negative removes).
+ * @returns {object} New board state; unchanged for an unknown land name. */
 export function addBasicLand(board, name, count = 1) {
   if (!BASIC_LAND_NAMES.includes(name)) return board;
   const next = { ...board, lands: { ...board.lands } };
@@ -709,10 +886,16 @@ export function addBasicLand(board, name, count = 1) {
   return next;
 }
 
+/** Total added basic lands on the board.
+ * @param {object} board - Board state.
+ * @returns {number} Land count. */
 export function landTotal(board) {
   return Object.values(board.lands || {}).reduce((sum, n) => sum + (n || 0), 0);
 }
 
+/** Card counts per board zone, plus added lands and the main-deck total (cards + lands).
+ * @param {object} board - Board state.
+ * @returns {{pool: number, main: number, sideboard: number, maybe: number, lands: number, mainTotal: number}} Counts. */
 export function boardCounts(board) {
   return {
     pool: board.pool.length,
@@ -724,10 +907,17 @@ export function boardCounts(board) {
   };
 }
 
+/** Whether the user has started building (any main/sideboard card or added land).
+ * @param {object} board - Board state.
+ * @returns {boolean} True once building has started; exports follow the board then. */
 export function boardIsActive(board) {
   return board.main.length > 0 || board.sideboard.length > 0 || landTotal(board) > 0;
 }
 
+/** Main-deck status against a target size (default 40): under / ready / over, with a message.
+ * @param {object} board - Board state.
+ * @param {number} [target=40] - Main-deck target size.
+ * @returns {{mainTotal: number, target: number, diff: number, state: string, message: string}} Status. */
 export function boardStatus(board, target = 40) {
   const mainTotal = board.main.length + landTotal(board);
   const diff = target - mainTotal;
@@ -746,6 +936,9 @@ export function boardStatus(board, target = 40) {
 }
 
 // Mana curve for the main deck, basic lands excluded. Buckets 0-6, then 7+.
+/** Mana curve for a card list, basic lands excluded. Buckets 0–6, then "7+".
+ * @param {object[]} cards - Cards to count.
+ * @returns {{cmc: number|string, count: number}[]} Eight buckets. */
 export function manaCurve(cards) {
   const buckets = Array.from({ length: 8 }, (_, i) => ({ cmc: i === 7 ? "7+" : i, count: 0 }));
   for (const card of cards || []) {
@@ -756,6 +949,9 @@ export function manaCurve(cards) {
   return buckets;
 }
 
+/** Color breakdown for a card list, basic lands excluded.
+ * @param {object[]} cards - Cards to count.
+ * @returns {{W: number, U: number, B: number, R: number, G: number, C: number, M: number}} Counts by color (C colorless, M multicolor). */
 export function colorBreakdown(cards) {
   const out = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, M: 0 };
   for (const card of cards || []) {
@@ -770,6 +966,10 @@ export function colorBreakdown(cards) {
 
 // Main deck as a flat card list, with added basic lands expanded using
 // a name -> card lookup (usually the set's own basic lands).
+/** Main deck as a flat card list, with added basic lands expanded via a name -> card lookup.
+ * @param {object} board - Board state.
+ * @param {object} [landCardsByName={}] - Map from basic land name to a card object.
+ * @returns {object[]} Main-deck cards, lands included. */
 export function boardMainCards(board, landCardsByName = {}) {
   const out = [...board.main];
   for (const name of BASIC_LAND_NAMES) {
@@ -781,12 +981,20 @@ export function boardMainCards(board, landCardsByName = {}) {
   return out;
 }
 
+/** Decklist for the board: Main Deck, then a Sideboard section when the sideboard is non-empty.
+ * @param {object} board - Board state.
+ * @param {object} [landCardsByName={}] - Map from basic land name to a card object.
+ * @returns {string} Decklist text. */
 export function boardDecklist(board, landCardsByName = {}) {
   const mainText = formatDecklist(aggregatePool(boardMainCards(board, landCardsByName)));
   if (board.sideboard.length === 0) return mainText;
   return `${mainText}\n\nSideboard\n${formatDecklist(aggregatePool(board.sideboard))}`;
 }
 
+/** Serialize a board as indices into the flat pool, for localStorage (avoids storing whole card objects twice).
+ * @param {object} board - Board state.
+ * @param {object[]} flatPool - Flat pool the indices refer to.
+ * @returns {{pool: number[], main: number[], sideboard: number[], maybe: number[], lands: object}} Serialized board. */
 export function serializeBoard(board, flatPool) {
   const zoneIndices = (zone) =>
     board[zone].map((card) => flatPool.indexOf(card)).filter((i) => i >= 0);
@@ -799,6 +1007,10 @@ export function serializeBoard(board, flatPool) {
   };
 }
 
+/** Restore a serialized board against the current flat pool.
+ * @param {object} saved - Output of serializeBoard.
+ * @param {object[]} flatPool - Flat pool the indices refer to.
+ * @returns {object|null} Board state, or null when the save is malformed. */
 export function deserializeBoard(saved, flatPool) {
   if (!saved || !Array.isArray(saved.pool)) return null;
   const zone = (arr) => (arr || []).map((i) => flatPool[i]).filter(Boolean);
@@ -823,6 +1035,11 @@ export function deserializeBoard(saved, flatPool) {
 // simply unavailable for those sets and the UI must say so, not invent
 // numbers. Historical data lives in 17Lands' bulk public datasets,
 // which are tens of MB of game logs — not fetchable on a static page.
+/** Parse 17Lands card-ratings JSON into a name -> rating map.
+ * A card counts as "with data" when its games-in-hand win rate exists
+ * and it has 100+ games; ratings are "available" with 10+ such cards.
+ * @param {object[]} data - Rows from the 17Lands card_ratings endpoint.
+ * @returns {{byName: object, total: number, withData: number, available: boolean}} Ratings map and availability. */
 export function parse17LandsRatings(data) {
   const byName = {};
   let withData = 0;
@@ -842,6 +1059,10 @@ export function parse17LandsRatings(data) {
   return { byName, total: Object.keys(byName).length, withData, available: withData >= 10 };
 }
 
+/** 17Lands rating for a card, by exact name, else by first face before " // ".
+ * @param {object} card - Scryfall card object.
+ * @param {object} ratings - Output of parse17LandsRatings.
+ * @returns {object|null} Rating entry, or null when unrated. */
 export function ratingFor(card, ratings) {
   if (!ratings || !ratings.byName) return null;
   if (ratings.byName[card.name]) return ratings.byName[card.name];
@@ -849,6 +1070,9 @@ export function ratingFor(card, ratings) {
   return ratings.byName[firstFace] || null;
 }
 
+/** Letter grade for a games-in-hand win rate: A >= 0.60, B >= 0.57, C >= 0.54, D >= 0.51, else F.
+ * @param {number|null} gih - Games-in-hand win rate (0–1).
+ * @returns {string|null} Grade, or null when unrated. */
 export function ratingGrade(gih) {
   if (gih === null || gih === undefined) return null;
   if (gih >= 0.6) return "A";
@@ -860,6 +1084,10 @@ export function ratingGrade(gih) {
 
 // Group a pool by color for the grouped view: W, U, B, R, G, multicolor,
 // colorless, then lands. Each group is sorted by mana value, then name.
+/** Group a pool by color for the grouped view: W, U, B, R, G, multicolor, colorless, then lands.
+ * Each group is sorted by mana value; empty groups are dropped.
+ * @param {object[]} cards - Cards to group.
+ * @returns {{key: string, label: string, cards: object[]}[]} Non-empty groups, in color order. */
 export function groupPoolByColor(cards) {
   const groups = [
     { key: "W", label: "White", cards: [] },
@@ -888,6 +1116,13 @@ export function groupPoolByColor(cards) {
 
 // Move every card matching predicate from one board zone to another,
 // preserving order. Returns the board unchanged when nothing matches.
+/** Move every card matching a predicate from one board zone to another, preserving order.
+ * Non-mutating; returns the board unchanged when nothing matches.
+ * @param {object} board - Board state.
+ * @param {string} fromZone - Source zone.
+ * @param {string} toZone - Destination zone.
+ * @param {(card: object) => boolean} predicate - Which cards move.
+ * @returns {object} New board state. */
 export function moveAll(board, fromZone, toZone, predicate) {
   if (!BOARD_ZONES.includes(fromZone) || !BOARD_ZONES.includes(toZone)) return board;
   if (fromZone === toZone) return board;

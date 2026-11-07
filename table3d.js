@@ -70,6 +70,12 @@ export function createTable(container, { onCardClick } = {}) {
   );
   const backMaterial = new THREE.MeshBasicMaterial({ map: backTexture });
   const placeholderMaterial = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.8 });
+  // One shared geometry for every card. Geometries, materials, and
+  // per-card textures are GPU resources: scene.remove() frees none of
+  // them, so setPack() must dispose them (see disposeCard below) or a
+  // sealed session leaks ~90 card meshes' worth of GPU memory.
+  const cardGeometry = new THREE.PlaneGeometry(CARD_W, CARD_H);
+  const glowGeometry = new THREE.PlaneGeometry(CARD_W + 0.1, CARD_H + 0.1);
 
   let cards = []; // { id, group, flip, flipStart, dealStart, target, revealed }
   let raf = 0;
@@ -103,20 +109,19 @@ export function createTable(container, { onCardClick } = {}) {
   function makeCardMesh(card) {
     const group = new THREE.Group();
     const inner = new THREE.Group();
-    const geometry = new THREE.PlaneGeometry(CARD_W, CARD_H);
-    const back = new THREE.Mesh(geometry, backMaterial);
+    const back = new THREE.Mesh(cardGeometry, backMaterial);
     back.position.z = 0.004;
     inner.add(back);
     const frontMaterial = card.image
       ? new THREE.MeshBasicMaterial({ map: loader.load(card.image) })
       : placeholderMaterial;
-    const front = new THREE.Mesh(geometry, frontMaterial);
+    const front = new THREE.Mesh(cardGeometry, frontMaterial);
     front.position.z = -0.004;
     front.rotation.y = Math.PI;
     inner.add(front);
     // Gold underlay, faded in when a rare/mythic flips.
     const glow = new THREE.Mesh(
-      new THREE.PlaneGeometry(CARD_W + 0.1, CARD_H + 0.1),
+      glowGeometry,
       new THREE.MeshBasicMaterial({ color: 0xd4a017, transparent: true, opacity: 0 }),
     );
     glow.position.z = -0.01;
@@ -124,8 +129,20 @@ export function createTable(container, { onCardClick } = {}) {
     inner.add(glow);
     group.add(inner);
     group.rotation.x = -Math.PI / 2;
-    group.userData = { cardId: card.id, inner, glow, isRare: card.rarity === "rare" || card.rarity === "mythic" };
+    group.userData = { cardId: card.id, inner, glow, frontMaterial, isRare: card.rarity === "rare" || card.rarity === "mythic" };
     return group;
+  }
+
+  // Free a card's GPU resources. The shared card geometry, the shared
+  // card-back material, and the placeholder material are owned by the
+  // controller, not the card, and must NOT be disposed here. The
+  // per-card front texture is cached by TextureLoader under its URL and
+  // reused across packs, so it is intentionally kept: disposing the
+  // material frees the material, the cached texture stays for reuse.
+  function disposeCard(entry) {
+    const { frontMaterial, glow } = entry.group.userData;
+    glow.material.dispose();
+    if (frontMaterial !== placeholderMaterial) frontMaterial.dispose();
   }
 
   function tick(now) {
@@ -172,7 +189,10 @@ export function createTable(container, { onCardClick } = {}) {
   }
 
   function setPack(order, revealedIds) {
-    for (const entry of cards) scene.remove(entry.group);
+    for (const entry of cards) {
+      disposeCard(entry);
+      scene.remove(entry.group);
+    }
     cards = order.map((card, index) => {
       const group = makeCardMesh(card);
       const target = slotPosition(index, order.length);
@@ -240,6 +260,13 @@ export function createTable(container, { onCardClick } = {}) {
       cancelAnimationFrame(raf);
       resizeObserver.disconnect();
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
+      for (const entry of cards) disposeCard(entry);
+      cards = [];
+      cardGeometry.dispose();
+      glowGeometry.dispose();
+      backMaterial.dispose();
+      backTexture.dispose();
+      placeholderMaterial.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     },

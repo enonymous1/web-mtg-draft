@@ -54,7 +54,16 @@ import {
 const $ = (id) => document.getElementById(id);
 const API = "https://api.scryfall.com";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+// Scryfall card endpoints allow 2 requests per second, so paged
+// fetches pause this long between pages and between /cards/collection
+// batches. The search page size and the collection batch limit (75)
+// are named here too, so a Scryfall limit change is one edit.
+const SCRYFALL_REQUEST_GAP_MS = 550;
+const SCRYFALL_PAGE_SIZE = 175;
+const SCRYFALL_COLLECTION_BATCH_SIZE = 70;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const rateLimitError = () =>
+  new Error("Scryfall is rate-limiting this browser right now. Wait 30 seconds and try again.");
 
 let sets = [];
 let buckets = null;
@@ -191,11 +200,9 @@ async function fetchAllPages(firstUrl, onProgress) {
   let url = firstUrl;
   let page = 0;
   while (url) {
-    if (page > 0) await sleep(550); // Scryfall card endpoints: 2 requests/second.
+    if (page > 0) await sleep(SCRYFALL_REQUEST_GAP_MS);
     const response = await fetch(url);
-    if (response.status === 429) {
-      throw new Error("Scryfall is rate-limiting this browser right now. Wait 30 seconds and try again.");
-    }
+    if (response.status === 429) throw rateLimitError();
     if (!response.ok) throw new Error(`Scryfall returned ${response.status}. Try another set.`);
     const data = await response.json();
     page += 1;
@@ -227,14 +234,14 @@ async function fetchTokens(code) {
     // Fall through to a live fetch.
   }
   const fetched = [];
-  for (let i = 0; i < ids.length; i += 70) {
-    if (i > 0) await sleep(550);
+  for (let i = 0; i < ids.length; i += SCRYFALL_COLLECTION_BATCH_SIZE) {
+    if (i > 0) await sleep(SCRYFALL_REQUEST_GAP_MS);
     const response = await fetch(`${API}/cards/collection`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ identifiers: ids.slice(i, i + 70).map((id) => ({ id })) }),
+      body: JSON.stringify({ identifiers: ids.slice(i, i + SCRYFALL_COLLECTION_BATCH_SIZE).map((id) => ({ id })) }),
     });
-    if (response.status === 429) throw new Error("Scryfall is rate-limiting this browser right now. Wait 30 seconds and try again.");
+    if (response.status === 429) throw rateLimitError();
     if (!response.ok) throw new Error(`Scryfall returned ${response.status} for tokens.`);
     const data = await response.json();
     fetched.push(...(data.data || []));
@@ -423,7 +430,7 @@ function updateSetInfo() {
   const code = $("set-select").value;
   currentSet = sets.find((s) => s.code === code) || null;
   $("set-info").innerHTML = currentSet
-    ? `${currentSet.icon_svg_uri ? `<img src="${escapeHtml(currentSet.icon_svg_uri)}" alt="" style="width:20px;height:20px;vertical-align:-4px"> ` : ""}${escapeHtml(currentSet.name)} (${escapeHtml(currentSet.code.toUpperCase())}) - released ${escapeHtml(currentSet.released_at || "unknown")}, ${escapeHtml(currentSet.card_count || "?")} cards in the set.`
+    ? `${currentSet.icon_svg_uri ? `<img class="set-icon" src="${escapeHtml(currentSet.icon_svg_uri)}" alt=""> ` : ""}${escapeHtml(currentSet.name)} (${escapeHtml(currentSet.code.toUpperCase())}) - released ${escapeHtml(currentSet.released_at || "unknown")}, ${escapeHtml(currentSet.card_count || "?")} cards in the set.`
     : "";
 }
 
@@ -466,6 +473,15 @@ async function fetchRatings(code) {
 function updateRatingsNote() {
   const el = $("ratings-status");
   if (el) el.textContent = ratingsNote;
+}
+
+// One place for the badges shown under a card's name: rarity, foil
+// copy, then the 17Lands rating. The reveal grid and the pool grid
+// used to build this string independently and had already drifted.
+function cardBadges(card) {
+  const rarity = ` <span class="badge ${escapeHtml(card.rarity)}">${escapeHtml(card.rarity)}</span>`;
+  const foil = card.foilCopy ? ` <span class="badge foil">Foil</span>` : "";
+  return rarity + foil + ratingBadge(card);
 }
 
 function ratingBadge(card) {
@@ -528,7 +544,7 @@ function renderReveal() {
       `<span class="flip-face flip-front">${image ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(card.name)}" loading="lazy">` : `<span>No image available</span>`}</span>` +
       `</span>` +
       `<span class="name">${flipped ? escapeHtml(card.name) : "???"}</span>` +
-      (flipped ? ` <span class="badge ${escapeHtml(card.rarity)}">${escapeHtml(card.rarity)}</span>${card.foilCopy ? ` <span class="badge foil">Foil</span>` : ""}` : "");
+      (flipped ? cardBadges(card) : "");
     button.addEventListener("click", () => {
       revealedCards.add(card.id);
       renderReveal();
@@ -627,7 +643,7 @@ function renderPool() {
           : `<div>No image available</div>`) +
         `<figcaption><span class="name">${escapeHtml(card.name)}</span>` +
         `<span class="meta">Pack ${card.packIndex} - ${escapeHtml(cardTypeLine(card))}</span> ` +
-        `<span class="badge ${escapeHtml(card.rarity)}">${escapeHtml(card.rarity)}</span>${card.foilCopy ? ` <span class="badge foil">Foil</span>` : ""}${ratingBadge(card)}</figcaption></figure>`;
+        `${cardBadges(card)}</figcaption></figure>`;
     }
     button.addEventListener("click", () => showCard(card));
     return button;
@@ -716,7 +732,7 @@ async function openPacks() {
       const query = encodeURIComponent(`e:${code}`);
       cards = await fetchAllPages(
         `${API}/cards/search?q=${query}&unique=prints&order=set`,
-        (page, total) => setStatus(`Loading the set pool from Scryfall\u2026 page ${page}${total ? ` of about ${Math.ceil(total / 175)}` : ""}.`),
+        (page, total) => setStatus(`Loading the set pool from Scryfall\u2026 page ${page}${total ? ` of about ${Math.ceil(total / SCRYFALL_PAGE_SIZE)}` : ""}.`),
       );
       writeCache(code, cards);
     }
