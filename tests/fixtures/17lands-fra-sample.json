@@ -1,0 +1,5 @@
+[
+  {"name": "Craftwork Crusher", "color": "R", "rarity": "uncommon", "ever_drawn_win_rate": 0.63103953, "ever_drawn_game_count": 683, "avg_seen": 4.2, "drawn_improvement_win_rate": 0.05, "opening_hand_win_rate": 0.6},
+  {"name": "Divining Duelist", "color": "U", "rarity": "common", "ever_drawn_win_rate": 0.60585198, "ever_drawn_game_count": 581, "avg_seen": 5.1, "drawn_improvement_win_rate": 0.04, "opening_hand_win_rate": 0.59},
+  {"name": "No Data Card", "color": "W", "rarity": "common", "ever_drawn_win_rate": null, "ever_drawn_game_count": 0, "avg_seen": null, "drawn_improvement_win_rate": null, "opening_hand_win_rate": null}
+]

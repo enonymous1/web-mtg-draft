@@ -45,11 +45,27 @@ URL hash. An empty seed means truly random.
 ## Sort, filter, export
 
 - Sort by pack order, name, rarity, mana value, color, type, price
-  (high to low), or collector number.
+  (high to low), draft rating (17Lands), or collector number.
 - Filter by name/type/rules text, rarity, color (including multicolor
   and colorless), and type.
-- View as card images or as a list. Click any card for a large image,
-  oracle text, price, and a Scryfall link.
+- View as card images, a list, or grouped by color. Click any card for
+  a large image, oracle text, price, 17Lands rating, and a Scryfall link.
+  The pool itself shows a mana curve and color breakdown, like the board.
+- Pack reveal (v1.3.0): packs open one at a time, cards face-down,
+  rare last. Click to flip, or press Space for the next card, N for the
+  next pack, A to reveal all. Skip to pool any time.
+- Draft ratings (v1.3.0): 17Lands Premier Draft data — games-in-hand
+  win rate, average last seen, improvement over baseline — fetched live
+  per set and cached 24 hours. 17Lands only publishes live ratings for
+  the current draft format, so older sets show no ratings rather than
+  guessed numbers. Each card shows a grade (A–F) and its GIH WR.
+- Foil slot (v1.3.0): about 1 pack in 3 has a foil, which replaces a
+  common. This is a documented approximation, not a per-set MTGJSON
+  booster template — MTGJSON's full file is too large to fetch on a
+  static page, and TCGplayer/CardMarket pricing was not added because
+  Scryfall's USD price already comes from TCGplayer.
+- Board bulk moves (v1.3.0): add all creatures, or all cards of one
+  color, from the pool to the Main Deck in one click.
 - Export: copy a decklist (`count name` per line), or download
   `.txt` (count, name, set, collector number), `.csv` (count, name,
   set, number, rarity, type, mana value, colors, mana cost, price),
@@ -113,6 +129,12 @@ Scryfall" — topics: `magic-the-gathering`, `mtg`, `draft`, `booster`,
 
 ## Notes and limits
 
+- Pack reveal + 17Lands + foil (v1.3.0): see Sort, filter, export above.
+  Live-checked 2026-11-07: the 17Lands card-ratings endpoint returns
+  JSON with `Access-Control-Allow-Origin: *`, and the current format
+  (FRA) has 218 cards with 100+ games; BLB, DSK, TDM, and FIN return
+  no games even with historical date ranges, which is why ratings are
+  unavailable for older sets.
 - Deck builder (v1.2.0): after opening packs, a board with Pool,
   Main Deck, Sideboard, and Maybeboard columns. Drag cards between
   columns, or open a card and use its Move to buttons. Main Deck shows

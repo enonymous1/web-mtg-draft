@@ -134,3 +134,33 @@ footer { color: var(--muted); font-size: 0.9rem; }
   .seed-row { flex-direction: column; }
   .grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
 }
+
+/* v1.3.0: pack reveal, ratings, grouped view, foil, hover zoom */
+.grid {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+.pool-card img, .board-card img {
+  transition: transform 0.15s ease;
+}
+.pool-card:hover img, .board-card:hover img {
+  transform: scale(1.04);
+}
+.badge.rating {
+  background: #2f6f4f;
+  color: #fff;
+}
+.badge.foil {
+  background: linear-gradient(45deg, #b8860b, #ffd700, #b8860b);
+  color: #1a1a1a;
+}
+.pool-card.foil, .board-card.foil {
+  outline: 2px solid #d4af37;
+  outline-offset: -2px;
+}
+.group-heading {
+  grid-column: 1 / -1;
+  margin: 1rem 0 0.25rem;
+}
+.reveal-card img {
+  transition: transform 0.25s ease;
+}

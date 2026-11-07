@@ -164,7 +164,18 @@ export function buildPack(buckets, rng = Math.random) {
   if (landTaken.length === 0) landTaken = takeFrom(buckets.commonLand, 1, used, rng);
   push(landTaken, "land");
 
-  return pack;
+  return applyFoil(pack, rng);
+}
+
+// Foil slot, MTGJSON-style approximation: about 1 pack in 3 has a foil,
+// and the foil replaces a common. This is not a per-set MTGJSON booster
+// template (those vary by set and would need the full MTGJSON file), so
+// it is labelled as an approximation in the README.
+export function applyFoil(pack, rng = Math.random) {
+  if (rng() >= 1 / 3) return pack;
+  const index = pack.map((c) => c.slot).lastIndexOf("common");
+  if (index < 0) return pack;
+  return pack.map((card, i) => (i === index ? { ...card, foil: true } : card));
 }
 
 export function buildPacks(buckets, packCount, rng = Math.random) {
@@ -201,10 +212,17 @@ export function aggregatePool(flat) {
 // --- Sorting and filtering --------------------------------------------
 const RARITY_ORDER = { mythic: 0, rare: 1, uncommon: 2, common: 3 };
 
-export function sortPool(cards, sortKey = "name") {
+export function sortPool(cards, sortKey = "name", ratings = {}) {
   const out = [...cards];
   const byName = (a, b) => a.name.localeCompare(b.name);
   switch (sortKey) {
+    case "rating": {
+      const gihOf = (c) => {
+        const r = ratingFor(c, ratings);
+        return r && r.gih !== null && r.gih !== undefined ? r.gih : -1;
+      };
+      return out.sort((a, b) => gihOf(b) - gihOf(a) || byName(a, b));
+    }
     case "cmc":
       return out.sort((a, b) => (a.cmc ?? 99) - (b.cmc ?? 99) || byName(a, b));
     case "rarity":
@@ -710,4 +728,99 @@ export function deserializeBoard(saved, flatPool) {
     maybe: zone(saved.maybe),
     lands: { Plains: 0, Island: 0, Swamp: 0, Mountain: 0, Forest: 0, ...(saved.lands || {}) },
   };
+}
+
+// --- 17Lands draft ratings --------------------------------------------
+// Endpoint (live-checked 2026-11-07): GET
+// https://www.17lands.com/card_ratings/data?expansion=<CODE>&event_type=PremierDraft&start_date=<set released_at>&end_date=<today>
+// Returns JSON, Access-Control-Allow-Origin: *, fields per card:
+// ever_drawn_win_rate (GIH WR, 0-1), ever_drawn_game_count, avg_seen
+// (ALSA), drawn_improvement_win_rate (IWD), opening_hand_win_rate.
+// Important limit, also live-checked: the endpoint only serves the
+// current draft format. For older sets (BLB, DSK, TDM, FIN) it returns
+// rows with no games even with a historical date range, so ratings are
+// simply unavailable for those sets and the UI must say so, not invent
+// numbers. Historical data lives in 17Lands' bulk public datasets,
+// which are tens of MB of game logs — not fetchable on a static page.
+export function parse17LandsRatings(data) {
+  const byName = {};
+  let withData = 0;
+  for (const row of Array.isArray(data) ? data : []) {
+    if (!row || typeof row.name !== "string") continue;
+    const games = row.ever_drawn_game_count ?? 0;
+    const entry = {
+      gih: row.ever_drawn_win_rate ?? null,
+      games,
+      alsa: row.avg_seen ?? null,
+      iwd: row.drawn_improvement_win_rate ?? null,
+      ohWr: row.opening_hand_win_rate ?? null,
+    };
+    byName[row.name] = entry;
+    if (entry.gih !== null && games >= 100) withData += 1;
+  }
+  return { byName, total: Object.keys(byName).length, withData, available: withData >= 10 };
+}
+
+export function ratingFor(card, ratings) {
+  if (!ratings || !ratings.byName) return null;
+  if (ratings.byName[card.name]) return ratings.byName[card.name];
+  const firstFace = card.name.split(" // ")[0];
+  return ratings.byName[firstFace] || null;
+}
+
+export function ratingGrade(gih) {
+  if (gih === null || gih === undefined) return null;
+  if (gih >= 0.6) return "A";
+  if (gih >= 0.57) return "B";
+  if (gih >= 0.54) return "C";
+  if (gih >= 0.51) return "D";
+  return "F";
+}
+
+// Group a pool by color for the grouped view: W, U, B, R, G, multicolor,
+// colorless, then lands. Each group is sorted by mana value, then name.
+export function groupPoolByColor(cards) {
+  const groups = [
+    { key: "W", label: "White", cards: [] },
+    { key: "U", label: "Blue", cards: [] },
+    { key: "B", label: "Black", cards: [] },
+    { key: "R", label: "Red", cards: [] },
+    { key: "G", label: "Green", cards: [] },
+    { key: "M", label: "Multicolor", cards: [] },
+    { key: "C", label: "Colorless", cards: [] },
+    { key: "Land", label: "Lands", cards: [] },
+  ];
+  const byKey = Object.fromEntries(groups.map((g) => [g.key, g]));
+  for (const card of cards || []) {
+    if (cardTypeLine(card).includes("Land")) {
+      byKey.Land.cards.push(card);
+      continue;
+    }
+    const colors = cardColors(card);
+    if (colors.length === 0) byKey.C.cards.push(card);
+    else if (colors.length > 1) byKey.M.cards.push(card);
+    else byKey[colors[0]].cards.push(card);
+  }
+  for (const group of groups) group.cards = sortPool(group.cards, "cmc");
+  return groups.filter((g) => g.cards.length > 0);
+}
+
+// Move every card matching predicate from one board zone to another,
+// preserving order. Returns the board unchanged when nothing matches.
+export function moveAll(board, fromZone, toZone, predicate) {
+  if (!BOARD_ZONES.includes(fromZone) || !BOARD_ZONES.includes(toZone)) return board;
+  if (fromZone === toZone) return board;
+  const moving = (board[fromZone] || []).filter(predicate);
+  if (moving.length === 0) return board;
+  const staying = (board[fromZone] || []).filter((c) => !predicate(c));
+  const next = {
+    pool: [...board.pool],
+    main: [...board.main],
+    sideboard: [...board.sideboard],
+    maybe: [...board.maybe],
+    lands: { ...board.lands },
+  };
+  next[fromZone] = staying;
+  next[toZone] = [...next[toZone], ...moving];
+  return next;
 }

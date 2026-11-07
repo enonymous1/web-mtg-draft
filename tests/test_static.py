@@ -6,7 +6,8 @@ same checks pass on Ubuntu and Windows CI runners.
 Scryfall is the main allowed external origin: the app fetches card data
 from api.scryfall.com at runtime and links out to scryfall.com. The TTS
 export also references the Scryfall card-back host backs.scryfall.io and
-the wsrv.nl image proxy (JPEG re-serving for Tabletop Simulator). No CDN
+the wsrv.nl image proxy (JPEG re-serving for Tabletop Simulator). Ratings
+come from 17lands.com/card_ratings/data (Premier Draft, GIH WR). No CDN
 code is loaded.
 """
 
@@ -46,6 +47,7 @@ class TestStaticSite(unittest.TestCase):
                         "scryfall.com" in url
                         or "scryfall.io" in url
                         or "wsrv.nl" in url
+                        or "17lands.com" in url
                         or "example.invalid" in url,
                         f"unexpected external URL in {name}: {url}",
                     )
@@ -72,8 +74,12 @@ class TestStaticSite(unittest.TestCase):
             "copy-decklist", "download-txt", "download-csv", "download-json",
             "download-tts", "tts-proxy",
             "pool-grid", "card-dialog", "card-detail",
+            "pack-reveal", "reveal-progress", "reveal-grid",
+            "reveal-all", "reveal-next-pack", "reveal-skip",
+            "ratings-status", "pool-curve", "pool-colors",
             "board-section", "board-status", "board-target", "board-sort",
-            "board-reset", "board-curve", "board-colors",
+            "board-reset", "bulk-creatures", "bulk-color", "bulk-color-add",
+            "board-curve", "board-colors",
             "board-pool", "board-main", "board-sideboard", "board-maybe",
             "board-count-pool", "board-count-main", "board-count-sideboard",
             "board-count-maybe", "card-move",
@@ -97,6 +103,11 @@ class TestStaticSite(unittest.TestCase):
         self.assertIn("/cards/collection", app)
         self.assertIn("createBoard", app)
         self.assertIn("moveCard", app)
+        self.assertIn("moveAll", app)
+        self.assertIn("fetchRatings", app)
+        self.assertIn("17lands.com/card_ratings/data", app)
+        self.assertIn("renderReveal", app)
+        self.assertIn("groupPoolByColor", app)
         self.assertIn("renderBoard", app)
         self.assertIn("boardDecklist", app)
         self.assertIn("serviceWorker", app)

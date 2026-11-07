@@ -50,12 +50,27 @@
       <button id="share-link" type="button">Copy share link</button>
     </div>
     <p id="status" class="status" role="status" aria-live="polite"></p>
-    <p class="muted">Classic draft pack: 1 rare or mythic (mythic about 1 in 8), 3 uncommons, 10 commons, 1 land. Tokens and bonus sheets are excluded.</p>
+    <p class="muted">Classic draft pack: 1 rare or mythic (mythic about 1 in 8), 3 uncommons, 10 commons, 1 land. About 1 pack in 3 has a foil, which replaces a common. Tokens and bonus sheets are excluded.</p>
+  </section>
+
+  <section id="pack-reveal" class="card" hidden>
+    <h2>Open packs</h2>
+    <p id="reveal-progress" class="stats" aria-live="polite"></p>
+    <p class="muted">Click a card to flip it over, or press Space to flip the next one. The rare is last. N = next pack, A = reveal all.</p>
+    <div class="actions">
+      <button id="reveal-all" type="button">Reveal all</button>
+      <button id="reveal-next-pack" type="button">Next pack</button>
+      <button id="reveal-skip" type="button">Skip to pool</button>
+    </div>
+    <div id="reveal-grid" class="grid" aria-live="polite"></div>
   </section>
 
   <section id="results" class="card" hidden>
     <h2>Your pool</h2>
     <p id="pool-stats" class="stats" aria-live="polite"></p>
+    <p id="ratings-status" class="muted" aria-live="polite"></p>
+    <div id="pool-curve" class="curve" aria-label="Mana curve for the pool"></div>
+    <p id="pool-colors" class="muted" aria-live="polite"></p>
 
     <div class="filters">
       <label for="filter-query">Search
@@ -103,6 +118,7 @@
           <option value="color">Color</option>
           <option value="type">Type</option>
           <option value="price">Price (high to low)</option>
+          <option value="rating">Draft rating (17Lands)</option>
           <option value="number">Collector number</option>
         </select>
       </label>
@@ -110,6 +126,7 @@
         <select id="view-select">
           <option value="grid">Card images</option>
           <option value="list">List</option>
+          <option value="groups">Grouped by color</option>
         </select>
       </label>
     </div>
@@ -149,6 +166,17 @@
         </select>
       </label>
       <button id="board-reset" type="button">Reset board</button>
+      <button id="bulk-creatures" type="button">Add all creatures to Main</button>
+      <label for="bulk-color">Add one color to Main
+        <select id="bulk-color">
+          <option value="W">White</option>
+          <option value="U">Blue</option>
+          <option value="B">Black</option>
+          <option value="R">Red</option>
+          <option value="G">Green</option>
+        </select>
+      </label>
+      <button id="bulk-color-add" type="button">Add that color to Main</button>
     </div>
 
     <div id="board-stats">
@@ -217,6 +245,8 @@
       <li>The set's card pool is fetched once from Scryfall, then cached in your browser for 24 hours. Scryfall asks for at most 2 card requests per second, so the first load of a set takes a few seconds while pages load.</li>
       <li>Each pack is dealt without replacement from that pool, so no card repeats inside one pack. Copies can repeat across packs, as in real sealed.</li>
       <li>Sorting and filtering happen locally on the cards you already have. No new request is made when you change a sort or filter.</li>
+      <li>Draft ratings come from 17Lands Premier Draft data (games-in-hand win rate, average last seen, improvement over baseline). 17Lands only publishes live ratings for the current draft format, so older sets show no ratings rather than guessed numbers. Ratings are cached for 24 hours.</li>
+      <li>Card data and images are from Scryfall. TCGplayer and CardMarket pricing were not added: Scryfall's USD price already comes from TCGplayer, and the others need keys for little extra in a draft pool. MTGJSON's per-set booster templates were not added either — the foil slot above is a documented approximation, and the full MTGJSON file is too large to fetch on a static page.</li>
     </ul>
   </section>
 </main>

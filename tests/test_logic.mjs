@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import {
   addBasicLand,
   aggregatePool,
+  applyFoil,
   boardCounts,
   boardDecklist,
   boardIsActive,
@@ -14,6 +16,7 @@ import {
   buildTTSSavedObject,
   cardImage,
   cardPrice,
+  cardTypeLine,
   collectTokenIds,
   colorBreakdown,
   createBoard,
@@ -24,13 +27,18 @@ import {
   filterPool,
   formatCSV,
   formatDecklist,
+  groupPoolByColor,
   hashSeed,
   isDoubleFaced,
   landTotal,
   manaCurve,
+  moveAll,
   moveCard,
   mulberry32,
+  parse17LandsRatings,
   partitionPool,
+  ratingFor,
+  ratingGrade,
   resetBoard,
   serializeBoard,
   shuffle,
@@ -418,4 +426,67 @@ test("board: serialize and deserialize round-trip, and reset returns all to pool
   assert.equal(reset.pool.length, 3);
   assert.equal(reset.main.length, 0);
   assert.equal(reset.lands.Mountain, 0);
+});
+
+test("17Lands: parse ratings, grade, and rating sort", () => {
+  const data = JSON.parse(fs.readFileSync(new URL("./fixtures/17lands-fra-sample.json", import.meta.url), "utf8"));
+  const ratings = parse17LandsRatings(data);
+  assert.equal(ratings.total, 3);
+  assert.equal(ratings.withData, 2);
+  assert.equal(ratings.available, false); // sample is small, needs >= 10 with data
+  assert.equal(ratingFor({ name: "Craftwork Crusher" }, ratings).gih, 0.63103953);
+  assert.equal(ratingGrade(0.63103953), "A");
+  assert.equal(ratingGrade(0.58), "B");
+  assert.equal(ratingGrade(0.55), "C");
+  assert.equal(ratingGrade(0.52), "D");
+  assert.equal(ratingGrade(0.49), "F");
+  assert.equal(ratingGrade(null), null);
+  assert.equal(ratingFor({ name: "No Such Card" }, ratings), null);
+  const cards = [
+    card({ id: "low", name: "Low Card", cmc: 1 }),
+    card({ id: "high", name: "Craftwork Crusher", cmc: 5 }),
+    card({ id: "mid", name: "Divining Duelist", cmc: 2 }),
+  ];
+  const sorted = sortPool(cards, "rating", ratings);
+  assert.deepEqual(sorted.map((c) => c.name), ["Craftwork Crusher", "Divining Duelist", "Low Card"]);
+  const empty = parse17LandsRatings([]);
+  assert.equal(empty.available, false);
+  assert.equal(empty.total, 0);
+});
+
+test("groupPoolByColor groups lands, multicolor, and colorless separately", () => {
+  const cards = [
+    card({ id: "w", name: "White One", colors: ["W"], cmc: 2 }),
+    card({ id: "m", name: "Multi One", colors: ["W", "U"], cmc: 3 }),
+    card({ id: "c", name: "Colorless One", colors: [], cmc: 1 }),
+    card({ id: "plains", name: "Plains", type_line: "Basic Land — Plains", cmc: 0 }),
+  ];
+  const groups = groupPoolByColor(cards);
+  assert.deepEqual(groups.map((g) => g.key), ["W", "M", "C", "Land"]);
+  assert.equal(groups.find((g) => g.key === "M").cards[0].name, "Multi One");
+});
+
+test("applyFoil replaces a common about 1 in 3 packs, never changes pack size", () => {
+  const pack = buildPack(buckets(), mulberry32(7));
+  assert.equal(pack.length, 15);
+  const foiled = applyFoil(pack, () => 0.0);
+  assert.equal(foiled.length, 15);
+  assert.equal(foiled.filter((c) => c.foil).length, 1);
+  assert.equal(foiled.find((c) => c.foil).slot, "common");
+  assert.equal(applyFoil(pack, () => 0.99), pack);
+  assert.equal(applyFoil(pack.filter((c) => c.slot !== "common"), () => 0.0).length, pack.filter((c) => c.slot !== "common").length);
+});
+
+test("moveAll moves every matching card and nothing else", () => {
+  const pool = [
+    card({ id: "a", name: "Alpha", type_line: "Creature — Cat", colors: ["W"] }),
+    card({ id: "b", name: "Beta", type_line: "Instant", colors: ["U"] }),
+    card({ id: "c", name: "Gamma", type_line: "Creature — Dog", colors: ["W"] }),
+  ];
+  let board = createBoard(pool);
+  board = moveAll(board, "pool", "main", (c) => cardTypeLine(c).includes("Creature"));
+  assert.equal(board.main.length, 2);
+  assert.equal(board.pool.length, 1);
+  assert.equal(board.pool[0].name, "Beta");
+  assert.equal(moveAll(board, "pool", "main", (c) => c.name === "Nope"), board);
 });

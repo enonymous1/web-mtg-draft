@@ -30,17 +30,23 @@ import {
   formatCSV,
   formatDecklist,
   formatDecklistDetailed,
+  groupPoolByColor,
   hashSeed,
   isBasicLand,
   manaCurve,
+  moveAll,
   moveCard,
   mulberry32,
+  parse17LandsRatings,
   partitionPool,
   poolCounts,
+  ratingFor,
+  ratingGrade,
   resetBoard,
   serializeBoard,
   sortBoard,
   sortPool,
+  TTS_CARD_BACK_URL,
 } from "./logic.js";
 
 const $ = (id) => document.getElementById(id);
@@ -59,6 +65,10 @@ let tokenCacheCode = "";
 let board = null;
 let boardMeta = null;
 let selectedBoardCard = null;
+let ratings = { byName: {}, total: 0, withData: 0, available: false };
+let ratingsNote = "";
+let revealPackIndex = 0;
+let revealedCards = new Set();
 
 function setStatus(text) {
   $("status").textContent = text;
@@ -326,9 +336,125 @@ function renderSetOptions(filterText) {
 function updateSetInfo() {
   const code = $("set-select").value;
   currentSet = sets.find((s) => s.code === code) || null;
-  $("set-info").textContent = currentSet
-    ? `${currentSet.name} (${currentSet.code.toUpperCase()}) - released ${currentSet.released_at || "unknown"}, ${currentSet.card_count || "?"} cards in the set.`
+  $("set-info").innerHTML = currentSet
+    ? `${currentSet.icon_svg_uri ? `<img src="${escapeHtml(currentSet.icon_svg_uri)}" alt="" style="width:20px;height:20px;vertical-align:-4px"> ` : ""}${escapeHtml(currentSet.name)} (${escapeHtml(currentSet.code.toUpperCase())}) - released ${escapeHtml(currentSet.released_at || "unknown")}, ${escapeHtml(currentSet.card_count || "?")} cards in the set.`
     : "";
+}
+
+async function fetchRatings(code) {
+  const key = `mtg-draft-17lands-v1:${code.toLowerCase()}`;
+  try {
+    const cached = JSON.parse(localStorage.getItem(key) || "null");
+    if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+      ratings = cached.ratings;
+      ratingsNote = ratings.available
+        ? `17Lands Premier Draft: ${ratings.withData} cards with ratings (GIH WR).`
+        : "17Lands: no ratings for this set — only the current draft format has live data.";
+      updateRatingsNote();
+      return;
+    }
+  } catch { /* fall through to a live fetch */ }
+  ratingsNote = "17Lands: loading ratings…";
+  updateRatingsNote();
+  try {
+    const released = currentSet?.released_at || "";
+    const today = new Date().toISOString().slice(0, 10);
+    const url = `https://www.17lands.com/card_ratings/data?expansion=${code.toUpperCase()}&event_type=PremierDraft&start_date=${released}&end_date=${today}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`17Lands returned ${response.status}`);
+    const parsed = parse17LandsRatings(await response.json());
+    ratings = parsed;
+    ratingsNote = parsed.available
+      ? `17Lands Premier Draft: ${parsed.withData} cards with ratings (GIH WR).`
+      : "17Lands: no ratings for this set — only the current draft format has live data.";
+    try { localStorage.setItem(key, JSON.stringify({ fetchedAt: Date.now(), ratings: parsed })); } catch { /* ignore */ }
+  } catch {
+    ratings = { byName: {}, total: 0, withData: 0, available: false };
+    ratingsNote = "17Lands: ratings could not be loaded — sorting by rating is unavailable.";
+  }
+  updateRatingsNote();
+  renderPool();
+  renderBoard();
+}
+
+function updateRatingsNote() {
+  const el = $("ratings-status");
+  if (el) el.textContent = ratingsNote;
+}
+
+function ratingBadge(card) {
+  const rating = ratingFor(card, ratings);
+  if (!rating || rating.gih === null || rating.gih === undefined) return "";
+  const grade = ratingGrade(rating.gih);
+  return ` <span class="badge rating" title="17Lands games-in-hand win rate, ${rating.games} games">17L ${grade} ${(rating.gih * 100).toFixed(1)}%</span>`;
+}
+
+// Pack reveal: one pack at a time, cards face-down, rare last.
+function revealOrder(pack) {
+  return [...pack].reverse();
+}
+
+function renderReveal() {
+  const section = $("pack-reveal");
+  section.hidden = false;
+  const pack = packs[revealPackIndex] || [];
+  const order = revealOrder(pack);
+  const revealedCount = order.filter((card) => revealedCards.has(card.id)).length;
+  $("reveal-progress").textContent =
+    `Pack ${revealPackIndex + 1} of ${packs.length} — ${revealedCount} of ${order.length} revealed` +
+    (revealPackIndex + 1 === packs.length ? " — last pack" : "");
+  $("reveal-next-pack").textContent = revealPackIndex + 1 === packs.length ? "Show pool" : "Next pack";
+  const grid = $("reveal-grid");
+  grid.innerHTML = "";
+  for (const card of order) {
+    const flipped = revealedCards.has(card.id);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `pool-card reveal-card${flipped ? " flipped" : ""}${card.foil ? " foil" : ""}`;
+    const image = cardImage(card, "normal");
+    button.innerHTML =
+      `<figure style="margin:0">` +
+      (flipped
+        ? (image ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(card.name)}" loading="lazy">` : `<div>No image available</div>`)
+        : `<img src="${escapeHtml(TTS_CARD_BACK_URL)}" alt="Face-down card" loading="lazy">`) +
+      `<figcaption><span class="name">${flipped ? escapeHtml(card.name) : "???"}</span>` +
+      (flipped ? `<span class="badge ${escapeHtml(card.rarity)}">${escapeHtml(card.rarity)}</span>${card.foil ? ` <span class="badge foil">Foil</span>` : ""}` : "") +
+      `</figcaption></figure>`;
+    button.addEventListener("click", () => {
+      revealedCards.add(card.id);
+      renderReveal();
+    });
+    grid.append(button);
+  }
+}
+
+function revealNextCard() {
+  const order = revealOrder(packs[revealPackIndex] || []);
+  const next = order.find((card) => !revealedCards.has(card.id));
+  if (next) {
+    revealedCards.add(next.id);
+    renderReveal();
+    return true;
+  }
+  return false;
+}
+
+function nextPack() {
+  if (revealPackIndex + 1 < packs.length) {
+    revealPackIndex += 1;
+    revealedCards = new Set();
+    renderReveal();
+  } else {
+    finishReveal();
+  }
+}
+
+function finishReveal() {
+  $("pack-reveal").hidden = true;
+  $("results").hidden = flatPool.length === 0;
+  $("board-section").hidden = flatPool.length === 0;
+  renderPool();
+  renderBoard();
 }
 
 function currentRng() {
@@ -344,7 +470,7 @@ function visiblePool() {
     color: $("filter-color").value,
     type: $("filter-type").value,
   };
-  return sortPool(filterPool(flatPool, filters), $("sort-select").value);
+  return sortPool(filterPool(flatPool, filters), $("sort-select").value, ratings);
 }
 
 function renderPool() {
@@ -361,19 +487,26 @@ function renderPool() {
     `(mythic ${counts.mythic || 0}, rare ${counts.rare || 0}, uncommon ${counts.uncommon || 0}, common ${counts.common || 0}) ` +
     `- pool value about $${totalPrice.toFixed(2)} (Scryfall USD, where listed).`;
 
+  const curve = manaCurve(flatPool.filter((card) => !isBasicLand(card)));
+  $("pool-curve").innerHTML = Object.entries(curve)
+    .map(([bucket, count]) => `<span class="curve-bar"><span class="curve-label">${escapeHtml(bucket)}</span><span class="curve-count">${count}</span></span>`)
+    .join("");
+  const poolColors = colorBreakdown(flatPool.filter((card) => !isBasicLand(card)));
+  $("pool-colors").textContent = `Pool colors — ${Object.entries(poolColors).map(([color, count]) => `${color} ${count}`).join(", ")}.`;
+  updateRatingsNote();
+
   const container = $("pool-grid");
   container.innerHTML = "";
   container.className = $("view-select").value === "list" ? "pool-list" : "grid";
-
-  for (const card of visible) {
+  const makeCardButton = (card) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "pool-card";
+    button.className = `pool-card${card.foil ? " foil" : ""}`;
     button.dataset.cardId = card.id;
     if ($("view-select").value === "list") {
       button.innerHTML =
         `<span><strong>${escapeHtml(card.name)}</strong> <span class="muted">${escapeHtml(cardTypeLine(card))}</span></span>` +
-        `<span class="muted">Pack ${card.packIndex} - ${escapeHtml(card.rarity)}${cardPrice(card) !== null ? ` - $${cardPrice(card).toFixed(2)}` : ""}</span>`;
+        `<span class="muted">Pack ${card.packIndex} - ${escapeHtml(card.rarity)}${cardPrice(card) !== null ? ` - $${cardPrice(card).toFixed(2)}` : ""}${ratingBadge(card)}</span>`;
     } else {
       const image = cardImage(card, "normal");
       button.innerHTML =
@@ -383,11 +516,23 @@ function renderPool() {
           : `<div>No image available</div>`) +
         `<figcaption><span class="name">${escapeHtml(card.name)}</span>` +
         `<span class="meta">Pack ${card.packIndex} - ${escapeHtml(cardTypeLine(card))}</span> ` +
-        `<span class="badge ${escapeHtml(card.rarity)}">${escapeHtml(card.rarity)}</span></figcaption></figure>`;
+        `<span class="badge ${escapeHtml(card.rarity)}">${escapeHtml(card.rarity)}</span>${card.foil ? ` <span class="badge foil">Foil</span>` : ""}${ratingBadge(card)}</figcaption></figure>`;
     }
     button.addEventListener("click", () => showCard(card));
-    container.append(button);
+    return button;
+  };
+
+  if ($("view-select").value === "groups") {
+    for (const group of groupPoolByColor(visible)) {
+      const heading = document.createElement("h3");
+      heading.className = "group-heading";
+      heading.textContent = `${group.label} (${group.cards.length})`;
+      container.append(heading);
+      for (const card of group.cards) container.append(makeCardButton(card));
+    }
+    return;
   }
+  for (const card of visible) container.append(makeCardButton(card));
 }
 
 function showCard(card) {
@@ -399,7 +544,13 @@ function showCard(card) {
     `<p>${escapeHtml(cardTypeLine(card))} - ${escapeHtml(card.rarity)} - ${escapeHtml(card.set.toUpperCase())} ${escapeHtml(card.collector_number)}</p>` +
     `<pre>${escapeHtml(cardOracleText(card))}</pre>` +
     `<p>Colors: ${escapeHtml(cardColors(card).join(", ") || "Colorless")} - Mana value: ${escapeHtml(card.cmc ?? "?")}` +
-    (price !== null ? ` - $${price.toFixed(2)}` : "") + `</p>` +
+    (price !== null ? ` - $${price.toFixed(2)}` : "") +
+    (() => {
+      const rating = ratingFor(card, ratings);
+      return rating && rating.gih !== null
+        ? ` - 17Lands ${ratingGrade(rating.gih)} ${(rating.gih * 100).toFixed(1)}% GIH WR (${rating.games} games${rating.alsa !== null ? `, ALSA ${rating.alsa.toFixed(1)}` : ""})`
+        : "";
+    })() + `</p>` +
     `<p><a href="${escapeHtml(card.scryfall_uri || `https://scryfall.com/card/${card.set}/${card.collector_number}`)}" target="_blank" rel="noreferrer">View on Scryfall</a></p>`;
   selectedBoardCard = findBoardLocation(card);
   $("card-move").hidden = !selectedBoardCard;
@@ -476,8 +627,12 @@ async function openPacks() {
       `(${fromCache ? "pool loaded from your 24-hour cache" : "pool fetched from Scryfall and cached for 24 hours"}; ` +
       `pool: ${counts.mythic} mythic, ${counts.rare} rare, ${counts.uncommon} uncommon, ${counts.common} common, ${counts.basicLand} basic lands).`,
     );
-    renderPool();
-    renderBoard();
+    revealPackIndex = 0;
+    revealedCards = new Set();
+    $("results").hidden = true;
+    $("board-section").hidden = true;
+    renderReveal();
+    fetchRatings(code);
   } catch (error) {
     setStatus(`Could not open packs: ${error.message}`);
   } finally {
@@ -499,6 +654,26 @@ $("random-seed").addEventListener("click", () => {
   $("seed").value = `mtg-${[...bytes].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 });
 $("open-packs").addEventListener("click", openPacks);
+$("reveal-all").addEventListener("click", () => {
+  for (const card of revealOrder(packs[revealPackIndex] || [])) revealedCards.add(card.id);
+  renderReveal();
+});
+$("reveal-next-pack").addEventListener("click", nextPack);
+$("reveal-skip").addEventListener("click", finishReveal);
+document.addEventListener("keydown", (event) => {
+  if ($("pack-reveal").hidden) return;
+  if ($("card-dialog").open) return;
+  if (event.target && (event.target.tagName === "INPUT" || event.target.tagName === "SELECT" || event.target.tagName === "TEXTAREA")) return;
+  if (event.code === "Space" || event.code === "Enter") {
+    event.preventDefault();
+    revealNextCard();
+  } else if (event.key === "n" || event.key === "N") {
+    nextPack();
+  } else if (event.key === "a" || event.key === "A") {
+    for (const card of revealOrder(packs[revealPackIndex] || [])) revealedCards.add(card.id);
+    renderReveal();
+  }
+});
 $("clear-pool").addEventListener("click", () => {
   try {
     if (boardKey()) localStorage.removeItem(boardKey());
@@ -513,6 +688,9 @@ $("clear-pool").addEventListener("click", () => {
   tokenCacheCode = "";
   board = null;
   boardMeta = null;
+  ratings = { byName: {}, total: 0, withData: 0, available: false };
+  ratingsNote = "";
+  $("pack-reveal").hidden = true;
   $("board-section").hidden = true;
   renderPool();
   setStatus("Pool cleared.");
@@ -530,6 +708,31 @@ $("board-reset").addEventListener("click", () => {
   saveBoard();
   renderBoard();
   setStatus("Board reset: all cards back in the pool, added lands cleared.");
+});
+$("bulk-creatures").addEventListener("click", () => {
+  if (!board) return;
+  const next = moveAll(board, "pool", "main", (card) => cardTypeLine(card).includes("Creature"));
+  if (next === board) {
+    setStatus("No creatures left in the pool.");
+    return;
+  }
+  board = next;
+  saveBoard();
+  renderBoard();
+  setStatus("All pool creatures moved to Main Deck.");
+});
+$("bulk-color-add").addEventListener("click", () => {
+  if (!board) return;
+  const color = $("bulk-color").value;
+  const next = moveAll(board, "pool", "main", (card) => cardColors(card).includes(color));
+  if (next === board) {
+    setStatus(`No ${color} cards left in the pool.`);
+    return;
+  }
+  board = next;
+  saveBoard();
+  renderBoard();
+  setStatus(`All ${color} pool cards moved to Main Deck.`);
 });
 document.querySelectorAll(".land-btn").forEach((button) => {
   button.addEventListener("click", () => {
