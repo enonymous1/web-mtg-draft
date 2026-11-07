@@ -1,23 +1,42 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  addBasicLand,
   aggregatePool,
+  boardCounts,
+  boardDecklist,
+  boardIsActive,
+  boardMainCards,
+  boardStatus,
+  buildLandPackCards,
   buildPack,
   buildPacks,
+  buildTTSSavedObject,
   cardImage,
   cardPrice,
+  collectTokenIds,
+  colorBreakdown,
+  createBoard,
   decodeShare,
+  deserializeBoard,
   encodeShare,
   filterDraftableSets,
   filterPool,
   formatCSV,
   formatDecklist,
   hashSeed,
+  isDoubleFaced,
+  landTotal,
+  manaCurve,
+  moveCard,
   mulberry32,
   partitionPool,
+  resetBoard,
+  serializeBoard,
   shuffle,
   sortPool,
   takeFrom,
+  ttsImageUrl,
 } from "../logic.js";
 
 function card(overrides = {}) {
@@ -33,6 +52,8 @@ function card(overrides = {}) {
     prices: overrides.prices || { usd: "1.00" },
     booster: overrides.booster,
     layout: overrides.layout,
+    image_uris: overrides.image_uris,
+    all_parts: overrides.all_parts,
     ...overrides.extra,
   };
 }
@@ -184,4 +205,217 @@ test("filterDraftableSets drops commander sets and sorts newest first", () => {
   ];
   const out = filterDraftableSets(sets);
   assert.deepEqual(out.map((s) => s.code), ["new", "old"]);
+});
+
+test("collectTokenIds finds only token parts", () => {
+  const cards = [
+    { name: "Raise", all_parts: [
+      { id: "tok-1", component: "token", name: "Soldier" },
+      { id: "combo-1", component: "combo_piece", name: "Raise" },
+    ]},
+    { name: "Plain" },
+    { name: "Raise Again", all_parts: [{ id: "tok-1", component: "token", name: "Soldier" }] },
+  ];
+  assert.deepEqual(collectTokenIds(cards), ["tok-1"]);
+});
+
+test("buildLandPackCards gives 4 of each basic land", () => {
+  const b = buckets();
+  b.basicLand = [
+    card({ id: "plains", name: "Plains", type_line: "Basic Land - Plains" }),
+    card({ id: "island", name: "Island", type_line: "Basic Land - Island" }),
+  ];
+  const lands = buildLandPackCards(b);
+  assert.equal(lands.length, 8);
+  assert.equal(lands.filter((c) => c.name === "Plains").length, 4);
+});
+
+test("TTS export is a Bag with a DeckCustom pool, sequential CardIDs, and matching CustomDeck keys", () => {
+  const pool = [
+    card({ id: "a", name: "Alpha", image_uris: { normal: "https://example.invalid/a.jpg" } }),
+    card({ id: "a", name: "Alpha", image_uris: { normal: "https://example.invalid/a.jpg" } }),
+    card({ id: "b", name: "Beta", image_uris: { normal: "https://example.invalid/b.jpg" } }),
+  ];
+  const { savedObject, skipped, deckCount, cardCount } = buildTTSSavedObject({
+    setName: "Test Set", setCode: "tst", packs: 1, seed: "seed-1", pool,
+  });
+  assert.equal(skipped, 0);
+  assert.equal(deckCount, 1);
+  assert.equal(cardCount, 3);
+  assert.equal(savedObject.ObjectStates[0].Name, "Bag");
+  const deck = savedObject.ObjectStates[0].ContainedObjects[0];
+  assert.equal(deck.Name, "DeckCustom");
+  assert.deepEqual(deck.DeckIDs, [100, 200, 300]);
+  assert.equal(deck.CustomDeck["2"].FaceURL, "https://example.invalid/a.jpg");
+  assert.equal(deck.CustomDeck["3"].FaceURL, "https://example.invalid/b.jpg");
+  assert.equal(deck.ContainedObjects[1].CardID, 200);
+  assert.deepEqual(Object.keys(deck.ContainedObjects[1].CustomDeck), ["2"]);
+  // Same Scryfall card twice still gets two distinct CardIDs.
+  assert.notEqual(deck.ContainedObjects[0].CardID, deck.ContainedObjects[1].CardID);
+});
+
+test("TTS export skips cards with no image and reports them", () => {
+  const pool = [card({ id: "noimg", name: "No Image" })];
+  delete pool[0].image_uris;
+  const { savedObject, skipped, cardCount } = buildTTSSavedObject({
+    setName: "Test Set", setCode: "tst", packs: 1, seed: "", pool,
+  });
+  assert.equal(skipped, 1);
+  assert.equal(cardCount, 0);
+  assert.equal(savedObject.ObjectStates[0].ContainedObjects.length, 0);
+});
+
+test("TTS double-faced cards get UniqueBack with the back face, normal cards do not", () => {
+  const dfc = {
+    id: "dfc-1", name: "Double Card", rarity: "rare", type_line: "Creature",
+    set: "tst", collector_number: "1", cmc: 2, colors: ["U"], prices: { usd: "1.00" },
+    card_faces: [
+      { image_uris: { normal: "https://example.invalid/front.jpg" }, oracle_text: "Front." },
+      { image_uris: { normal: "https://example.invalid/back.jpg" }, oracle_text: "Back." },
+    ],
+  };
+  assert.equal(isDoubleFaced(dfc), true);
+  const { savedObject } = buildTTSSavedObject({
+    setName: "Test Set", setCode: "tst", packs: 1, seed: "", pool: [dfc],
+  });
+  const entry = savedObject.ObjectStates[0].ContainedObjects[0].CustomDeck["1"];
+  assert.equal(entry.FaceURL, "https://example.invalid/front.jpg");
+  assert.equal(entry.BackURL, "https://example.invalid/back.jpg");
+  assert.equal(entry.UniqueBack, true);
+  assert.equal(entry.BackIsHidden, false);
+});
+
+test("TTS proxy rewrites face URLs through wsrv.nl as JPEG", () => {
+  assert.equal(
+    ttsImageUrl("https://example.invalid/a.jpg", { proxy: true }),
+    "https://wsrv.nl/?url=https%3A%2F%2Fexample.invalid%2Fa.jpg&output=jpg",
+  );
+  assert.equal(ttsImageUrl("https://example.invalid/a.jpg", {}), "https://example.invalid/a.jpg");
+});
+
+test("TTS export includes token and land decks when given", () => {
+  const pool = [card({ id: "a", name: "Alpha", image_uris: { normal: "https://example.invalid/a.jpg" } })];
+  const tokens = [card({ id: "t1", name: "Soldier Token", image_uris: { normal: "https://example.invalid/t.jpg" } })];
+  const lands = [card({ id: "plains", name: "Plains", image_uris: { normal: "https://example.invalid/p.jpg" } })];
+  const { savedObject, deckCount, cardCount } = buildTTSSavedObject({
+    setName: "Test Set", setCode: "tst", packs: 1, seed: "", pool, tokens, lands,
+  });
+  assert.equal(deckCount, 3);
+  assert.equal(cardCount, 3);
+  assert.deepEqual(
+    savedObject.ObjectStates[0].ContainedObjects.map((d) => d.Nickname),
+    ["Pool", "Tokens", "Basic Lands"],
+  );
+});
+
+test("board: create, move, and counts", () => {
+  const pool = [
+    card({ id: "a", name: "Alpha", cmc: 1, colors: ["W"] }),
+    card({ id: "b", name: "Beta", cmc: 3, colors: ["U", "B"] }),
+    card({ id: "c", name: "Gamma", cmc: 0 }),
+  ];
+  let board = createBoard(pool);
+  assert.equal(board.pool.length, 3);
+  assert.deepEqual(boardCounts(board), { pool: 3, main: 0, sideboard: 0, maybe: 0, lands: 0, mainTotal: 0 });
+  // createBoard sorts by cmc: Gamma (0), Alpha (1), Beta (3).
+  const moved = moveCard(board, "pool", "main", 0);
+  assert.equal(moved.pool.length, 2);
+  assert.equal(moved.main.length, 1);
+  assert.equal(moved.main[0].name, "Gamma");
+  // Original board is untouched (moves are non-mutating).
+  assert.equal(board.pool.length, 3);
+  // Bad zone / index / same zone are no-ops.
+  assert.equal(moveCard(moved, "pool", "main", 99), moved);
+  assert.equal(moveCard(moved, "pool", "pool", 0), moved);
+  assert.equal(moveCard(moved, "pool", "nowhere", 0), moved);
+  board = moveCard(moved, "main", "sideboard", 0);
+  assert.equal(board.main.length, 0);
+  assert.equal(board.sideboard.length, 1);
+});
+
+test("board: basic lands are counts, clamped, and count toward the main deck", () => {
+  let board = createBoard([]);
+  board = addBasicLand(board, "Plains", 5);
+  board = addBasicLand(board, "Island", 2);
+  board = addBasicLand(board, "Plains", -1);
+  assert.equal(landTotal(board), 6);
+  assert.equal(boardCounts(board).mainTotal, 6);
+  assert.equal(boardStatus(board, 40).state, "under");
+  assert.equal(boardStatus(board, 40).diff, 34);
+  board = addBasicLand(board, "Forest", 100);
+  assert.equal(board.lands.Forest, 99);
+  assert.equal(addBasicLand(board, "NotALand", 1), board);
+  assert.equal(boardIsActive(board), true);
+  assert.equal(boardIsActive(createBoard([])), false);
+});
+
+test("board: status ready and over", () => {
+  let board = createBoard([]);
+  board = addBasicLand(board, "Plains", 40);
+  assert.equal(boardStatus(board, 40).state, "ready");
+  board = addBasicLand(board, "Plains", 1);
+  assert.equal(boardStatus(board, 40).state, "over");
+  assert.equal(boardStatus(board, 40).diff, -1);
+});
+
+test("board: mana curve and color breakdown exclude basic lands", () => {
+  const main = [
+    card({ id: "a", name: "Alpha", cmc: 1, colors: ["W"] }),
+    card({ id: "b", name: "Beta", cmc: 7, colors: ["U", "B"] }),
+    card({ id: "c", name: "Gamma", cmc: 8, colors: [] }),
+    card({ id: "plains", name: "Plains", type_line: "Basic Land — Plains", cmc: 0 }),
+  ];
+  const curve = manaCurve(main);
+  assert.equal(curve[1].count, 1);
+  assert.equal(curve[7].count, 2); // 7 and 8+ both land in "7+"
+  assert.equal(curve[0].count, 0); // the Plains is a basic land, excluded
+  assert.deepEqual(colorBreakdown(main), { W: 1, U: 0, B: 0, R: 0, G: 0, C: 1, M: 1 });
+});
+
+test("board: main cards expand added lands, decklist separates sideboard", () => {
+  const plains = card({ id: "plains", name: "Plains", type_line: "Basic Land — Plains" });
+  const spell = card({ id: "a", name: "Alpha", cmc: 1 });
+  let board = createBoard([spell, plains]);
+  board = moveCard(board, "pool", "main", 0); // Alpha is cmc 1, Plains is cmc 0 — first is Plains
+  // After the move, main holds one card; check the decklist shape instead
+  // of assuming which card moved first.
+  const mainCards = boardMainCards(board, { Plains: plains });
+  assert.equal(mainCards.length, 1);
+  board = addBasicLand(board, "Plains", 2);
+  const expanded = boardMainCards(board, { Plains: plains });
+  assert.equal(expanded.length, 3);
+  assert.equal(expanded.filter((c) => c.name === "Plains").length, 2);
+  const list = boardDecklist(board, { Plains: plains });
+  assert.ok(list.includes("Plains"));
+  // Sideboard section appears only when the sideboard is non-empty.
+  assert.ok(!list.includes("Sideboard"));
+  board = moveCard(board, "pool", "sideboard", 0);
+  assert.ok(boardDecklist(board, { Plains: plains }).includes("Sideboard"));
+});
+
+test("board: serialize and deserialize round-trip, and reset returns all to pool", () => {
+  const pool = [
+    card({ id: "a", name: "Alpha", cmc: 1 }),
+    card({ id: "b", name: "Beta", cmc: 2 }),
+    card({ id: "c", name: "Gamma", cmc: 3 }),
+  ];
+  let board = createBoard(pool);
+  board = moveCard(board, "pool", "main", 0);
+  board = moveCard(board, "pool", "maybe", 0);
+  board = addBasicLand(board, "Mountain", 4);
+  const flat = [...board.pool, ...board.main, ...board.maybe];
+  // Serialize against the original flat order is lossy here, so serialize
+  // against the board's own card objects by rebuilding a flat list first.
+  const allCards = [...board.pool, ...board.main, ...board.sideboard, ...board.maybe];
+  const saved = serializeBoard(board, allCards);
+  const restored = deserializeBoard(saved, allCards);
+  assert.deepEqual(restored.main.map((c) => c.name), board.main.map((c) => c.name));
+  assert.deepEqual(restored.maybe.map((c) => c.name), board.maybe.map((c) => c.name));
+  assert.equal(restored.lands.Mountain, 4);
+  assert.equal(deserializeBoard(null, allCards), null);
+  assert.equal(deserializeBoard({}, allCards), null);
+  const reset = resetBoard(board);
+  assert.equal(reset.pool.length, 3);
+  assert.equal(reset.main.length, 0);
+  assert.equal(reset.lands.Mountain, 0);
 });

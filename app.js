@@ -2,15 +2,27 @@
 // All pack math lives in logic.js; this file only fetches from Scryfall,
 // caches the pool for 24 hours, renders the pool, and handles exports.
 import {
+  addBasicLand,
   aggregatePool,
+  boardCounts,
+  boardDecklist,
+  boardIsActive,
+  boardMainCards,
+  boardStatus,
+  buildLandPackCards,
   buildPacks,
+  buildTTSSavedObject,
   cardColors,
   cardImage,
   cardManaCost,
   cardOracleText,
   cardPrice,
   cardTypeLine,
+  collectTokenIds,
+  colorBreakdown,
+  createBoard,
   decodeShare,
+  deserializeBoard,
   encodeShare,
   filterDraftableSets,
   filterPool,
@@ -19,9 +31,15 @@ import {
   formatDecklist,
   formatDecklistDetailed,
   hashSeed,
+  isBasicLand,
+  manaCurve,
+  moveCard,
   mulberry32,
   partitionPool,
   poolCounts,
+  resetBoard,
+  serializeBoard,
+  sortBoard,
   sortPool,
 } from "./logic.js";
 
@@ -35,6 +53,12 @@ let buckets = null;
 let packs = [];
 let flatPool = [];
 let currentSet = null;
+let rawCards = [];
+let tokenCards = [];
+let tokenCacheCode = "";
+let board = null;
+let boardMeta = null;
+let selectedBoardCard = null;
 
 function setStatus(text) {
   $("status").textContent = text;
@@ -90,6 +114,164 @@ async function fetchAllPages(firstUrl, onProgress) {
     url = data.has_more ? data.next_page : null;
   }
   return cards;
+}
+
+// Fetch the tokens cards in this pool can create, via POST
+// /cards/collection in batches of 70 (limit 75), 550ms apart, the
+// batched pattern Omes' TTS importer uses. Cached 24 hours per set.
+// A failure here is not fatal: the TTS export still works without tokens.
+async function fetchTokens(code) {
+  if (tokenCacheCode === code.toLowerCase()) return tokenCards;
+  const ids = collectTokenIds(rawCards);
+  tokenCards = [];
+  tokenCacheCode = code.toLowerCase();
+  if (ids.length === 0) return tokenCards;
+  const cacheKeyTokens = `mtg-draft-tokens-v1:${code.toLowerCase()}`;
+  try {
+    const cached = JSON.parse(localStorage.getItem(cacheKeyTokens) || "null");
+    if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+      tokenCards = cached.cards || [];
+      return tokenCards;
+    }
+  } catch {
+    // Fall through to a live fetch.
+  }
+  const fetched = [];
+  for (let i = 0; i < ids.length; i += 70) {
+    if (i > 0) await sleep(550);
+    const response = await fetch(`${API}/cards/collection`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identifiers: ids.slice(i, i + 70).map((id) => ({ id })) }),
+    });
+    if (response.status === 429) throw new Error("Scryfall is rate-limiting this browser right now. Wait 30 seconds and try again.");
+    if (!response.ok) throw new Error(`Scryfall returned ${response.status} for tokens.`);
+    const data = await response.json();
+    fetched.push(...(data.data || []));
+  }
+  tokenCards = fetched;
+  try {
+    localStorage.setItem(cacheKeyTokens, JSON.stringify({ fetchedAt: Date.now(), cards: fetched }));
+  } catch {
+    // A full quota must not break the export.
+  }
+  return tokenCards;
+}
+
+// --- Deck-builder board -------------------------------------------
+// The board is saved as indices into the flat pool, keyed by set, pack
+// count, and seed, so reopening the same packs restores it.
+function boardKey() {
+  if (!boardMeta) return null;
+  return `mtg-draft-board-v1:${boardMeta.set}:${boardMeta.packs}:${boardMeta.seed}`;
+}
+
+function saveBoard() {
+  if (!board || !boardKey()) return;
+  try {
+    localStorage.setItem(boardKey(), JSON.stringify({
+      set: boardMeta.set,
+      packs: boardMeta.packs,
+      seed: boardMeta.seed,
+      board: serializeBoard(board, flatPool),
+    }));
+  } catch {
+    // A full quota must not break building.
+  }
+}
+
+function loadBoard() {
+  if (!boardKey()) return null;
+  try {
+    const saved = JSON.parse(localStorage.getItem(boardKey()) || "null");
+    if (!saved || saved.set !== boardMeta.set || saved.packs !== boardMeta.packs || saved.seed !== boardMeta.seed) return null;
+    const restored = deserializeBoard(saved.board, flatPool);
+    if (!restored) return null;
+    const total = restored.pool.length + restored.main.length + restored.sideboard.length + restored.maybe.length;
+    if (total !== flatPool.length) return null;
+    return restored;
+  } catch {
+    return null;
+  }
+}
+
+function landCardsByName() {
+  const map = {};
+  for (const card of buckets?.basicLand || []) map[card.name] = card;
+  for (const card of flatPool) {
+    if (isBasicLand(card) && !map[card.name]) map[card.name] = card;
+  }
+  return map;
+}
+
+function boardTarget() {
+  return Math.min(100, Math.max(20, Number.parseInt($("board-target").value, 10) || 40));
+}
+
+function renderBoard() {
+  if (!board) return;
+  $("board-section").hidden = false;
+  const counts = boardCounts(board);
+  const status = boardStatus(board, boardTarget());
+  $("board-status").textContent =
+    `Main Deck ${counts.mainTotal} / ${status.target} — ${status.message}. ` +
+    `Pool ${counts.pool}, Sideboard ${counts.sideboard}, Maybeboard ${counts.maybe}, added lands ${counts.lands}.`;
+  for (const zone of ["pool", "main", "sideboard", "maybe"]) {
+    $(`board-count-${zone}`).textContent = `(${board[zone].length})`;
+    const container = $(`board-${zone}`);
+    container.innerHTML = "";
+    board[zone].forEach((card, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "board-card";
+      button.draggable = true;
+      button.dataset.zone = zone;
+      button.dataset.index = String(index);
+      const image = cardImage(card, "normal");
+      button.innerHTML =
+        (image ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(card.name)}" loading="lazy">` : "") +
+        `<span class="name">${escapeHtml(card.name)}</span>` +
+        `<span class="meta">${escapeHtml(cardTypeLine(card))} — ${escapeHtml(card.rarity)} — ${card.cmc ?? "?"} mana</span>`;
+      button.addEventListener("click", () => showCard(card));
+      button.addEventListener("dragstart", (event) => {
+        event.dataTransfer.setData("text/plain", JSON.stringify({ zone, index }));
+        event.dataTransfer.effectAllowed = "move";
+      });
+      container.append(button);
+    });
+  }
+  for (const name of ["Plains", "Island", "Swamp", "Mountain", "Forest"]) {
+    $(`land-count-${name}`).textContent = String(board.lands[name] || 0);
+  }
+  const curve = manaCurve(board.main);
+  const max = Math.max(1, ...curve.map((b) => b.count));
+  $("board-curve").innerHTML = curve.map((b) => (
+    `<div class="curve-bar"><div class="bar" style="height:${Math.max(b.count ? 4 : 2, Math.round((b.count / max) * 48))}px"></div>` +
+    `<div>${b.cmc}</div><div>${b.count}</div></div>`
+  )).join("");
+  const colors = colorBreakdown(board.main);
+  const nonLand = board.main.filter((c) => !isBasicLand(c)).length;
+  $("board-colors").textContent =
+    `Main deck colors (non-land, ${nonLand} cards): ` +
+    `W ${colors.W}, U ${colors.U}, B ${colors.B}, R ${colors.R}, G ${colors.G}, colorless ${colors.C}, multicolor ${colors.M}.`;
+}
+
+function moveBoardCard(fromZone, index, toZone) {
+  if (!board) return;
+  const next = moveCard(board, fromZone, toZone, index);
+  if (next === board) return;
+  board = next;
+  saveBoard();
+  renderBoard();
+}
+
+function findBoardLocation(card) {
+  if (!board) return null;
+  for (const zone of ["pool", "main", "sideboard", "maybe"]) {
+    const index = board[zone].indexOf(card);
+    if (index >= 0) return { zone, index };
+  }
+  return null;
 }
 
 async function loadSets() {
@@ -219,6 +401,8 @@ function showCard(card) {
     `<p>Colors: ${escapeHtml(cardColors(card).join(", ") || "Colorless")} - Mana value: ${escapeHtml(card.cmc ?? "?")}` +
     (price !== null ? ` - $${price.toFixed(2)}` : "") + `</p>` +
     `<p><a href="${escapeHtml(card.scryfall_uri || `https://scryfall.com/card/${card.set}/${card.collector_number}`)}" target="_blank" rel="noreferrer">View on Scryfall</a></p>`;
+  selectedBoardCard = findBoardLocation(card);
+  $("card-move").hidden = !selectedBoardCard;
   $("card-dialog").showModal();
 }
 
@@ -273,9 +457,14 @@ async function openPacks() {
       );
       writeCache(code, cards);
     }
+    rawCards = cards;
+    tokenCards = [];
+    tokenCacheCode = "";
     buckets = partitionPool(cards);
     packs = buildPacks(buckets, packCount, currentRng());
     flatPool = flattenPacks(packs);
+    boardMeta = { set: code.toLowerCase(), packs: packCount, seed: $("seed").value.trim() };
+    board = loadBoard() || createBoard(flatPool);
     if (flatPool.length === 0) {
       setStatus("That set returned no draftable cards after filtering tokens and bonus sheets. Try another set.");
       return;
@@ -288,6 +477,7 @@ async function openPacks() {
       `pool: ${counts.mythic} mythic, ${counts.rare} rare, ${counts.uncommon} uncommon, ${counts.common} common, ${counts.basicLand} basic lands).`,
     );
     renderPool();
+    renderBoard();
   } catch (error) {
     setStatus(`Could not open packs: ${error.message}`);
   } finally {
@@ -310,11 +500,70 @@ $("random-seed").addEventListener("click", () => {
 });
 $("open-packs").addEventListener("click", openPacks);
 $("clear-pool").addEventListener("click", () => {
+  try {
+    if (boardKey()) localStorage.removeItem(boardKey());
+  } catch {
+    // Ignore storage errors on clear.
+  }
   packs = [];
   flatPool = [];
   buckets = null;
+  rawCards = [];
+  tokenCards = [];
+  tokenCacheCode = "";
+  board = null;
+  boardMeta = null;
+  $("board-section").hidden = true;
   renderPool();
   setStatus("Pool cleared.");
+});
+$("board-target").addEventListener("change", renderBoard);
+$("board-sort").addEventListener("change", () => {
+  if (!board) return;
+  board = sortBoard(board, $("board-sort").value);
+  saveBoard();
+  renderBoard();
+});
+$("board-reset").addEventListener("click", () => {
+  if (!board) return;
+  board = resetBoard(board);
+  saveBoard();
+  renderBoard();
+  setStatus("Board reset: all cards back in the pool, added lands cleared.");
+});
+document.querySelectorAll(".land-btn").forEach((button) => {
+  button.addEventListener("click", () => {
+    if (!board) return;
+    board = addBasicLand(board, button.dataset.land, Number.parseInt(button.dataset.delta, 10) || 0);
+    saveBoard();
+    renderBoard();
+  });
+});
+document.querySelectorAll(".board-zone").forEach((zoneEl) => {
+  zoneEl.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    zoneEl.classList.add("drag-over");
+  });
+  zoneEl.addEventListener("dragleave", () => zoneEl.classList.remove("drag-over"));
+  zoneEl.addEventListener("drop", (event) => {
+    event.preventDefault();
+    zoneEl.classList.remove("drag-over");
+    try {
+      const { zone, index } = JSON.parse(event.dataTransfer.getData("text/plain"));
+      moveBoardCard(zone, index, zoneEl.dataset.zone);
+    } catch {
+      // A drop without our card payload is ignored.
+    }
+  });
+});
+document.querySelectorAll(".move-btn").forEach((button) => {
+  button.addEventListener("click", () => {
+    if (!selectedBoardCard) return;
+    const { zone, index } = selectedBoardCard;
+    selectedBoardCard = null;
+    $("card-dialog").close();
+    moveBoardCard(zone, index, button.dataset.moveZone);
+  });
 });
 $("share-link").addEventListener("click", async () => {
   const code = $("set-select").value;
@@ -329,16 +578,57 @@ for (const id of ["filter-query", "filter-rarity", "filter-color", "filter-type"
   $(id).addEventListener("input", renderPool);
   $(id).addEventListener("change", renderPool);
 }
+// Once the board has any main/sideboard cards or added lands, exports
+// describe the deck being built, not the whole pool. Otherwise they
+// keep exporting the pool exactly as before.
+function boardExportCards() {
+  if (!board || !boardIsActive(board)) return null;
+  return [...boardMainCards(board, landCardsByName()), ...board.sideboard];
+}
+
 $("copy-decklist").addEventListener("click", async () => {
+  if (board && boardIsActive(board)) {
+    await copyText(boardDecklist(board, landCardsByName()), "Board decklist copied (Main Deck, then Sideboard).");
+    return;
+  }
   await copyText(formatDecklist(aggregatePool(visiblePool())), "Decklist copied.");
 });
 $("download-txt").addEventListener("click", () => {
+  if (board && boardIsActive(board)) {
+    download("mtg-deck.txt", boardDecklist(board, landCardsByName()), "text/plain");
+    return;
+  }
   download("mtg-pool.txt", formatDecklistDetailed(aggregatePool(flatPool)), "text/plain");
 });
 $("download-csv").addEventListener("click", () => {
+  const deckCards = boardExportCards();
+  if (deckCards) {
+    download("mtg-deck.csv", formatCSV(aggregatePool(deckCards)), "text/csv");
+    return;
+  }
   download("mtg-pool.csv", formatCSV(aggregatePool(flatPool)), "text/csv");
 });
 $("download-json").addEventListener("click", () => {
+  const deckCards = boardExportCards();
+  if (deckCards) {
+    download("mtg-deck.json", JSON.stringify({
+      set: currentSet,
+      packs: packs.length,
+      seed: $("seed").value.trim(),
+      generatedAt: new Date().toISOString(),
+      board: {
+        main: board.main,
+        sideboard: board.sideboard,
+        maybe: board.maybe,
+        pool: board.pool,
+        lands: board.lands,
+        mainTotal: boardCounts(board).mainTotal,
+      },
+      aggregated: aggregatePool(deckCards).map(({ card, count, packs: packList }) => ({ count, packs: packList, card })),
+      cards: deckCards,
+    }, null, 2), "application/json");
+    return;
+  }
   download("mtg-pool.json", JSON.stringify({
     set: currentSet,
     packs: packs.length,
@@ -347,6 +637,48 @@ $("download-json").addEventListener("click", () => {
     aggregated: aggregatePool(flatPool).map(({ card, count, packs: packList }) => ({ count, packs: packList, card })),
     cards: flatPool,
   }, null, 2), "application/json");
+});
+$("download-tts").addEventListener("click", async () => {
+  if (flatPool.length === 0) {
+    setStatus("Open packs first, then download the TTS file.");
+    return;
+  }
+  const button = $("download-tts");
+  button.disabled = true;
+  try {
+    setStatus("Fetching tokens for the TTS export\u2026");
+    let tokens = [];
+    try {
+      tokens = await fetchTokens($("set-select").value);
+    } catch (error) {
+      setStatus(`Token fetch failed (${error.message}); exporting the pool without tokens.`);
+      tokens = [];
+    }
+    const deckCards = boardExportCards();
+    const lands = deckCards ? [] : (buckets ? buildLandPackCards(buckets) : []);
+    const { savedObject, skipped, deckCount, cardCount } = buildTTSSavedObject({
+      setName: currentSet ? currentSet.name : $("set-select").value.toUpperCase(),
+      setCode: $("set-select").value,
+      packs: packs.length,
+      seed: $("seed").value.trim(),
+      pool: deckCards || flatPool,
+      tokens,
+      lands,
+      options: { proxy: $("tts-proxy").checked },
+      poolLabel: deckCards ? "Main Deck" : "Pool",
+    });
+    const code = $("set-select").value.toLowerCase();
+    download(`mtg-${deckCards ? "deck" : "pool"}-${code}-tts.json`, JSON.stringify(savedObject, null, 2), "application/json");
+    setStatus(
+      `TTS file downloaded: ${cardCount} cards in ${deckCount} deck${deckCount === 1 ? "" : "s"} ` +
+      (deckCards ? `(Main Deck + Sideboard, including added lands)` : `(Pool, ${tokens.length > 0 ? "Tokens, " : ""}Basic Lands)`) +
+      (skipped > 0 ? `; ${skipped} card${skipped === 1 ? "" : "s"} skipped (no image)` : "") +
+      `. In TTS, copy it to Documents/My Games/Tabletop Simulator/Saves/Saved Objects, then Objects > Saved Objects in game. ` +
+      `Face images are Scryfall${$("tts-proxy").checked ? " via wsrv.nl as JPEG" : " direct"}; if cards load blank in TTS, re-export with the image proxy on.`,
+    );
+  } finally {
+    button.disabled = false;
+  }
 });
 
 if ("serviceWorker" in navigator) {

@@ -63,6 +63,8 @@ button.primary, button:disabled { opacity: 1; }
 button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 button:disabled { cursor: wait; opacity: 0.6; }
 .muted { color: var(--muted); }
+.check { display: flex; gap: 0.5rem; font-weight: 400; align-items: flex-start; }
+.check input { width: auto; margin-top: 0.25rem; }
 .status { font-weight: 600; }
 .stats { font-weight: 600; }
 .filters {
@@ -107,6 +109,26 @@ dialog img { width: 100%; max-width: 340px; border-radius: 10px; }
 .dialog-close { float: right; }
 #card-detail { clear: both; }
 #card-detail pre { white-space: pre-wrap; }
+.board-controls { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; margin: 1rem 0; }
+.board-controls label { margin-top: 0; }
+.board-controls input, .board-controls select { width: auto; }
+.board-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; margin-top: 1rem; }
+.board-column { border: 1px solid var(--line); border-radius: 10px; padding: 0.5rem; }
+.board-column h3 { margin: 0 0 0.5rem; }
+.board-zone { display: grid; gap: 0.5rem; min-height: 120px; }
+.board-zone.drag-over { outline: 2px dashed var(--accent); outline-offset: 4px; }
+.board-card { border: 1px solid var(--line); border-radius: 8px; padding: 0.4rem; background: transparent; text-align: left; }
+.board-card img { width: 100%; border-radius: 6px; display: block; }
+.board-card .name { font-weight: 700; display: block; font-size: 0.9rem; }
+.board-card .meta { color: var(--muted); font-size: 0.8rem; display: block; }
+.board-card.selected { outline: 2px solid var(--accent); }
+.curve { display: flex; gap: 0.4rem; align-items: end; min-height: 72px; margin-top: 1rem; }
+.curve-bar { flex: 1; text-align: center; font-size: 0.8rem; }
+.curve-bar .bar { background: var(--accent); border-radius: 4px 4px 0 0; min-height: 2px; margin: 0 auto; width: 70%; }
+#board-lands { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-top: 1rem; }
+#board-lands h3 { width: 100%; margin: 0; }
+.land-row { display: flex; gap: 0.4rem; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 0.3rem 0.5rem; }
+.land-btn { padding: 0.2rem 0.6rem; }
 footer { color: var(--muted); font-size: 0.9rem; }
 @media (max-width: 520px) {
   .seed-row { flex-direction: column; }

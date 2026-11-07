@@ -119,11 +119,96 @@
       <button id="download-txt" type="button">Download .txt</button>
       <button id="download-csv" type="button">Download .csv</button>
       <button id="download-json" type="button">Download .json</button>
+      <button id="download-tts" type="button">Download TTS .json</button>
     </div>
-    <p class="muted">Decklist format is one line per card: count, then name. The CSV and JSON carry set, collector number, rarity, type, mana value, colors, and price.</p>
+    <label class="check">
+      <input id="tts-proxy" type="checkbox" checked>
+      TTS image proxy (wsrv.nl, as JPEG) — on for Tabletop Simulator, which has repeatedly failed to load direct Scryfall / WebP images
+    </label>
+    <p class="muted">Decklist format is one line per card: count, then name. The CSV and JSON carry set, collector number, rarity, type, mana value, colors, and price. The TTS file is a Saved Object: a bag holding your pool deck, a tokens deck, and a basic-land pack. Copy it to Documents/My Games/Tabletop Simulator/Saves/Saved Objects, then load it from Objects &gt; Saved Objects in game. Double-faced cards flip to their back face.</p>
 
     <div id="pool-grid" class="grid" aria-live="polite"></div>
     <p id="empty-note" class="muted" hidden>No cards match these filters.</p>
+  </section>
+
+  <section id="board-section" class="card" hidden>
+    <h2>Deck builder</h2>
+    <p id="board-status" class="stats" aria-live="polite"></p>
+    <p class="muted">Drag cards between columns, or open a card and use its Move to buttons. Lands in your pool stay in the pool — basic lands are unlimited in limited, so add them by count below instead.</p>
+
+    <div class="board-controls">
+      <label for="board-target">Main deck target
+        <input id="board-target" type="number" min="20" max="100" value="40">
+      </label>
+      <label for="board-sort">Sort board by
+        <select id="board-sort">
+          <option value="cmc">Mana value</option>
+          <option value="name">Name</option>
+          <option value="rarity">Rarity</option>
+          <option value="color">Color</option>
+        </select>
+      </label>
+      <button id="board-reset" type="button">Reset board</button>
+    </div>
+
+    <div id="board-stats">
+      <div id="board-curve" class="curve" aria-label="Mana curve for the main deck"></div>
+      <p id="board-colors" class="muted" aria-live="polite"></p>
+    </div>
+
+    <div id="board-lands">
+      <h3>Basic lands (add by count)</h3>
+      <div class="land-row" data-land="Plains">
+        <span>Plains</span>
+        <button type="button" class="land-btn" data-land="Plains" data-delta="-1" aria-label="Remove a Plains">−</button>
+        <span id="land-count-Plains">0</span>
+        <button type="button" class="land-btn" data-land="Plains" data-delta="1" aria-label="Add a Plains">+</button>
+      </div>
+      <div class="land-row" data-land="Island">
+        <span>Island</span>
+        <button type="button" class="land-btn" data-land="Island" data-delta="-1" aria-label="Remove an Island">−</button>
+        <span id="land-count-Island">0</span>
+        <button type="button" class="land-btn" data-land="Island" data-delta="1" aria-label="Add an Island">+</button>
+      </div>
+      <div class="land-row" data-land="Swamp">
+        <span>Swamp</span>
+        <button type="button" class="land-btn" data-land="Swamp" data-delta="-1" aria-label="Remove a Swamp">−</button>
+        <span id="land-count-Swamp">0</span>
+        <button type="button" class="land-btn" data-land="Swamp" data-delta="1" aria-label="Add a Swamp">+</button>
+      </div>
+      <div class="land-row" data-land="Mountain">
+        <span>Mountain</span>
+        <button type="button" class="land-btn" data-land="Mountain" data-delta="-1" aria-label="Remove a Mountain">−</button>
+        <span id="land-count-Mountain">0</span>
+        <button type="button" class="land-btn" data-land="Mountain" data-delta="1" aria-label="Add a Mountain">+</button>
+      </div>
+      <div class="land-row" data-land="Forest">
+        <span>Forest</span>
+        <button type="button" class="land-btn" data-land="Forest" data-delta="-1" aria-label="Remove a Forest">−</button>
+        <span id="land-count-Forest">0</span>
+        <button type="button" class="land-btn" data-land="Forest" data-delta="1" aria-label="Add a Forest">+</button>
+      </div>
+    </div>
+
+    <div class="board-columns">
+      <div class="board-column">
+        <h3>Pool <span id="board-count-pool"></span></h3>
+        <div id="board-pool" class="board-zone" data-zone="pool"></div>
+      </div>
+      <div class="board-column">
+        <h3>Main Deck <span id="board-count-main"></span></h3>
+        <div id="board-main" class="board-zone" data-zone="main"></div>
+      </div>
+      <div class="board-column">
+        <h3>Sideboard <span id="board-count-sideboard"></span></h3>
+        <div id="board-sideboard" class="board-zone" data-zone="sideboard"></div>
+      </div>
+      <div class="board-column">
+        <h3>Maybeboard <span id="board-count-maybe"></span></h3>
+        <div id="board-maybe" class="board-zone" data-zone="maybe"></div>
+      </div>
+    </div>
+    <p class="muted">Exports use your Main Deck + Sideboard (plus added lands) once you start building; otherwise they export the whole pool. Your board is saved in this browser for this set, pack count, and seed.</p>
   </section>
 
   <section class="card">
@@ -141,6 +226,13 @@
     <button type="submit" class="dialog-close" aria-label="Close">Close</button>
   </form>
   <div id="card-detail"></div>
+  <div id="card-move" class="actions" hidden>
+    <span class="muted">Move to:</span>
+    <button type="button" class="move-btn" data-move-zone="pool">Pool</button>
+    <button type="button" class="move-btn" data-move-zone="main">Main Deck</button>
+    <button type="button" class="move-btn" data-move-zone="sideboard">Sideboard</button>
+    <button type="button" class="move-btn" data-move-zone="maybe">Maybeboard</button>
+  </div>
 </dialog>
 
 <footer>

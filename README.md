@@ -54,6 +54,23 @@ URL hash. An empty seed means truly random.
   `.txt` (count, name, set, collector number), `.csv` (count, name,
   set, number, rarity, type, mana value, colors, mana cost, price),
   or `.json` (the full pool plus the aggregated list).
+- Tabletop Simulator export (v1.1.0): **Download TTS .json** writes a
+  TTS Saved Object — a bag holding a Pool deck, a Tokens deck, and a
+  Basic Lands pack (4 of each basic land in the set, 20 cards when all
+  five are present). It uses per-card decks, not a 10x7 sprite sheet:
+  each card gets its own `FaceURL`, `DeckIDs` run 100, 200, 300, …,
+  and each `CustomDeck` key matches the hundredth place of its
+  `CardID`, as in the TTS save-file format. Double-faced cards get
+  `UniqueBack` with the back face as the back image, so they flip in
+  game. Tokens are fetched for the cards in your pool via Scryfall's
+  batched `POST /cards/collection` (70 per batch) and cached for 24
+  hours; if that fetch fails, the export still works without tokens.
+  To load it, copy the file to
+  `Documents/My Games/Tabletop Simulator/Saves/Saved Objects`, then in
+  game go to Objects &gt; Saved Objects. The image proxy checkbox is on
+  by default: it re-serves Scryfall faces through wsrv.nl as JPEG,
+  because TTS's Unity player has repeatedly failed to load direct
+  Scryfall / WebP images. Turn it off for direct Scryfall URLs.
 
 ## Files
 
@@ -96,6 +113,21 @@ Scryfall" — topics: `magic-the-gathering`, `mtg`, `draft`, `booster`,
 
 ## Notes and limits
 
+- Deck builder (v1.2.0): after opening packs, a board with Pool,
+  Main Deck, Sideboard, and Maybeboard columns. Drag cards between
+  columns, or open a card and use its Move to buttons. Main Deck shows
+  a live count against a target (40 by default, changeable), a mana
+  curve, and a color breakdown. Basic lands are unlimited in limited,
+  so add them by count with the +/− buttons instead of dragging them.
+  The board is saved in your browser for that set, pack count, and
+  seed. Once you start building, all exports (decklist, .txt, .csv,
+  .json, TTS) describe the Main Deck + Sideboard plus added lands;
+  otherwise they export the whole pool as before.
+- v1.1.0 adds the TTS export only; the opener itself is unchanged.
+  The TTS format was checked against the TTS save-file format and a
+  live booster JSON from joshbirnholz's tts-magic-booster service, but
+  it has not yet been loaded in Tabletop Simulator itself — that is
+  still a his-side check after push.
 - This is v1: solo opener and sealed pool generator only. Pick-one
   drafting against bots is a later step, and live multiplayer would
   need a server, so it is out of scope for a Pages site.

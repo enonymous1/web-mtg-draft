@@ -3,8 +3,10 @@
 Uses pathlib objects directly (never rendered path strings) so the
 same checks pass on Ubuntu and Windows CI runners.
 
-Scryfall is the one allowed external origin: the app fetches card data
-from api.scryfall.com at runtime and links out to scryfall.com. No CDN
+Scryfall is the main allowed external origin: the app fetches card data
+from api.scryfall.com at runtime and links out to scryfall.com. The TTS
+export also references the Scryfall card-back host backs.scryfall.io and
+the wsrv.nl image proxy (JPEG re-serving for Tabletop Simulator). No CDN
 code is loaded.
 """
 
@@ -41,7 +43,10 @@ class TestStaticSite(unittest.TestCase):
             for url in urls:
                 with self.subTest(name=name, url=url):
                     self.assertTrue(
-                        "scryfall.com" in url or "example.invalid" in url,
+                        "scryfall.com" in url
+                        or "scryfall.io" in url
+                        or "wsrv.nl" in url
+                        or "example.invalid" in url,
                         f"unexpected external URL in {name}: {url}",
                     )
 
@@ -65,7 +70,15 @@ class TestStaticSite(unittest.TestCase):
             "results", "pool-stats", "filter-query", "filter-rarity",
             "filter-color", "filter-type", "sort-select", "view-select",
             "copy-decklist", "download-txt", "download-csv", "download-json",
+            "download-tts", "tts-proxy",
             "pool-grid", "card-dialog", "card-detail",
+            "board-section", "board-status", "board-target", "board-sort",
+            "board-reset", "board-curve", "board-colors",
+            "board-pool", "board-main", "board-sideboard", "board-maybe",
+            "board-count-pool", "board-count-main", "board-count-sideboard",
+            "board-count-maybe", "card-move",
+            "land-count-Plains", "land-count-Island", "land-count-Swamp",
+            "land-count-Mountain", "land-count-Forest",
         ):
             self.assertIn(f'id="{element_id}"', html, element_id)
 
@@ -79,6 +92,13 @@ class TestStaticSite(unittest.TestCase):
         self.assertIn("partitionPool", app)
         self.assertIn("buildPacks", app)
         self.assertIn("formatCSV", app)
+        self.assertIn("buildTTSSavedObject", app)
+        self.assertIn("fetchTokens", app)
+        self.assertIn("/cards/collection", app)
+        self.assertIn("createBoard", app)
+        self.assertIn("moveCard", app)
+        self.assertIn("renderBoard", app)
+        self.assertIn("boardDecklist", app)
         self.assertIn("serviceWorker", app)
         self.assertIn("sw.js", app)
 
