@@ -103,13 +103,29 @@ export function partitionPool(cards) {
     basicLand: [],
     commonLand: [],
   };
+  // Scryfall's `booster` flag is no longer meaningful for recent sets:
+  // live-checked 2026-11-07, every card in TMT, SOS, MSH, HOB, FRA,
+  // and TRK has booster === false, while ECL and earlier are booster
+  // === true. Scryfall deprecated is:booster / the booster field in
+  // 2026, so for those sets the flag would empty the whole pool.
+  // Rule: apply the flag only when at least 10% of the otherwise
+  // eligible cards carry it; otherwise ignore it for that set.
+  const eligible = (cards || []).filter(
+    (card) =>
+      card &&
+      typeof card.name === "string" &&
+      card.layout !== "token" &&
+      card.layout !== "emblem" &&
+      !cardTypeLine(card).includes("Token") &&
+      card.rarity !== "bonus" &&
+      card.rarity !== "special",
+  );
+  const boosterShare =
+    eligible.length === 0 ? 0 : eligible.filter((card) => card.booster === true).length / eligible.length;
+  const useBoosterFlag = boosterShare >= 0.1;
   const seen = new Set();
-  for (const card of cards || []) {
-    if (!card || typeof card.name !== "string") continue;
-    if (card.layout === "token" || card.layout === "emblem") continue;
-    if (cardTypeLine(card).includes("Token")) continue;
-    if (card.rarity === "bonus" || card.rarity === "special") continue;
-    if (card.booster === false) continue;
+  for (const card of eligible) {
+    if (useBoosterFlag && card.booster === false) continue;
     const key = `${card.name}|${card.rarity}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -343,7 +359,10 @@ export function decodeShare(hash) {
 
 // Draftable set types for the picker. Commander, tokens, and memorabilia
 // sets are not draft boosters, so they are left out on purpose.
-export const DRAFTABLE_SET_TYPES = ["expansion", "core", "masters", "draftinnovation"];
+// Note: Scryfall spells it "draft_innovation" (with an underscore).
+// The old value "draftinnovation" matched nothing, so draft-innovation
+// sets such as Mystery Booster Commander Edition never appeared.
+export const DRAFTABLE_SET_TYPES = ["expansion", "core", "masters", "draft_innovation"];
 
 export function filterDraftableSets(sets) {
   return (sets || [])

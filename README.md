@@ -66,6 +66,22 @@ URL hash. An empty seed means truly random.
   Scryfall's USD price already comes from TCGplayer.
 - Board bulk moves (v1.3.0): add all creatures, or all cards of one
   color, from the pool to the Main Deck in one click.
+- Recent sets fixed (v1.5.1): Scryfall stopped setting `booster: true`
+  for sets from TMT (Mar 2026) onward — every card in TMT, SOS, MSH,
+  HOB, FRA, and TRK is `booster: false`, so the old filter emptied
+  those pools entirely. The filter now applies only when at least 10%
+  of a set's eligible cards carry the flag; otherwise it is ignored
+  for that set. Bloomburrow's pool is byte-identical to before the
+  fix (79/100/60/20/5/2). Also fixed: the draftable set-type list
+  spelled it `draftinnovation`; Scryfall spells it
+  `draft_innovation`, so Mystery Booster sets never appeared.
+  ScrollVault's sealed tool does not hit this because it serves
+  pre-cached per-set JSON from its own server (`/draft/data/<code>.json`)
+  instead of filtering live Scryfall data — its `is:booster` fallback
+  is broken the same way (404 for FRA). This app still fetches live
+  from Scryfall, so it now works for recent sets without a server.
+  Still open: real Play Booster packs are 14 cards with wildcard
+  slots (this app still deals classic 15-card packs for every set).
 - Panel system (v1.5.0): AdminLTE 4.10.0 + Bootstrap 5.3.8 +
   Bootstrap Icons 1.11.3, vendored under `assets/vendor/` (1.1 MB,
   MIT, no CDN — same set as workspace-monitor and

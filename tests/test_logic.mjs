@@ -102,19 +102,39 @@ test("takeFrom samples without replacement", () => {
 
 test("partitionPool skips tokens, bonus sheets, non-booster printings, and dedupes", () => {
   const cards = [
-    card({ id: "c1", name: "Common One", rarity: "common" }),
-    card({ id: "c1-art", name: "Common One", rarity: "common" }),
+    card({ id: "c1", name: "Common One", rarity: "common", booster: true }),
+    card({ id: "c1-art", name: "Common One", rarity: "common", booster: true }),
     card({ id: "tok", name: "Soldier Token", rarity: "common", type_line: "Token Creature - Soldier", layout: "token" }),
     card({ id: "bon", name: "Bonus Card", rarity: "bonus" }),
     card({ id: "promo", name: "Promo Card", rarity: "rare", booster: false }),
-    card({ id: "plains", name: "Plains", rarity: "common", type_line: "Basic Land - Plains" }),
-    card({ id: "guildgate", name: "Guildgate", rarity: "common", type_line: "Land - Gate" }),
+    card({ id: "plains", name: "Plains", rarity: "common", type_line: "Basic Land - Plains", booster: true }),
+    card({ id: "guildgate", name: "Guildgate", rarity: "common", type_line: "Land - Gate", booster: true }),
   ];
   const out = partitionPool(cards);
   assert.equal(out.common.length, 1);
   assert.equal(out.basicLand.length, 1);
   assert.equal(out.commonLand.length, 1);
   assert.equal(out.rare.length, 0);
+});
+
+test("partitionPool ignores the booster flag when a set has none (FRA/TRK, live 2026-11-07)", () => {
+  // Scryfall stopped setting booster: true for sets from TMT (Mar 2026)
+  // onward; every card in FRA and TRK is booster: false, so applying the
+  // flag would empty the whole pool.
+  const cards = [
+    card({ id: "c1", name: "Common One", rarity: "common", booster: false }),
+    card({ id: "u1", name: "Uncommon One", rarity: "uncommon", booster: false }),
+    card({ id: "r1", name: "Rare One", rarity: "rare", booster: false }),
+    card({ id: "m1", name: "Mythic One", rarity: "mythic", booster: false }),
+    card({ id: "plains", name: "Plains", rarity: "common", type_line: "Basic Land - Plains", booster: false }),
+    card({ id: "tok", name: "Soldier Token", rarity: "common", type_line: "Token Creature - Soldier", layout: "token", booster: false }),
+  ];
+  const out = partitionPool(cards);
+  assert.equal(out.common.length, 1);
+  assert.equal(out.uncommon.length, 1);
+  assert.equal(out.rare.length, 1);
+  assert.equal(out.mythic.length, 1);
+  assert.equal(out.basicLand.length, 1);
 });
 
 test("buildPack is a classic 15-card pack with no repeats inside it", () => {
@@ -210,9 +230,10 @@ test("filterDraftableSets drops commander sets and sorts newest first", () => {
     { code: "cmd", set_type: "commander", released_at: "2025-01-01", name: "Commander" },
     { code: "old", set_type: "expansion", released_at: "2020-01-01", name: "Old" },
     { code: "new", set_type: "expansion", released_at: "2024-01-01", name: "New" },
+    { code: "mbc", set_type: "draft_innovation", released_at: "2026-10-19", name: "Mystery Booster Commander Edition" },
   ];
   const out = filterDraftableSets(sets);
-  assert.deepEqual(out.map((s) => s.code), ["new", "old"]);
+  assert.deepEqual(out.map((s) => s.code), ["mbc", "new", "old"]);
 });
 
 test("collectTokenIds finds only token parts", () => {
