@@ -66,6 +66,18 @@ URL hash. An empty seed means truly random.
   Scryfall's USD price already comes from TCGplayer.
 - Board bulk moves (v1.3.0): add all creatures, or all cards of one
   color, from the pool to the Main Deck in one click.
+- Panel system (v1.5.0): AdminLTE 4.10.0 + Bootstrap 5.3.8 +
+  Bootstrap Icons 1.11.3, vendored under `assets/vendor/` (1.1 MB,
+  MIT, no CDN — same set as workspace-monitor and
+  achievement-trackers). Sidebar steps: 1. Open packs, 2. Pack reveal,
+  3. Pool, 4. Deck builder, 5. Export, plus How it works. One panel
+  at a time, with Next / Back buttons; steps that need a pool stay
+  locked until packs are opened. Sidebar badges show the pool count
+  and Main Deck vs target. Light/dark toggle in the header, saved in
+  your browser (`mtg-theme`). Pack logic, ratings, TTS export, board,
+  and animations are unchanged — this is a shell restyle. The Pages
+  workflow copies `assets/vendor/` into the deploy, and the service
+  worker caches it (cache `mtg-draft-v2`).
 - Animations (v1.4.0): pure CSS keyframes, driven by JavaScript —
   not Java, which does not run in a browser. Pack reveal is a true 3D
   flip (card back rotates to the card face), cards deal in one by one

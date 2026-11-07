@@ -7,249 +7,354 @@
 <meta name="description" content="Open classic Magic draft boosters from any set, sort your pool, and export it. Static site, no account, powered by Scryfall.">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
+<script>
+  (function () {
+    try {
+      var theme = localStorage.getItem("mtg-theme");
+      if (!theme) theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      document.documentElement.setAttribute("data-bs-theme", theme);
+    } catch (e) {}
+  })();
+</script>
+<link rel="stylesheet" href="assets/vendor/bootstrap.min.css">
+<link rel="stylesheet" href="assets/vendor/bootstrap-icons.min.css">
+<link rel="stylesheet" href="assets/vendor/adminlte.min.css">
 <link rel="stylesheet" href="styles.css">
 </head>
-<body>
-<header>
-  <h1>MTG Draft</h1>
-  <p class="tagline">Solo pack opener. Pick a set, open packs, sort the pool, export it.</p>
-</header>
-
-<main>
-  <section class="card" aria-labelledby="setup-heading">
-    <h2 id="setup-heading">Open packs</h2>
-
-    <label for="set-search">Set</label>
-    <input id="set-search" type="search" placeholder="Search sets, e.g. Bloomburrow or blb" autocomplete="off">
-    <select id="set-select" aria-label="Choose a set">
-      <option value="">Loading sets from Scryfall&hellip;</option>
-    </select>
-    <p id="set-info" class="muted" aria-live="polite"></p>
-
-    <fieldset>
-      <legend>Packs</legend>
-      <div class="presets" role="group" aria-label="Pack presets">
-        <button type="button" class="preset" data-packs="1">1 pack</button>
-        <button type="button" class="preset" data-packs="3">3 packs (draft)</button>
-        <button type="button" class="preset" data-packs="6">6 packs (sealed)</button>
-      </div>
-      <label for="pack-count">Custom pack count (1&ndash;36)</label>
-      <input id="pack-count" type="number" min="1" max="36" value="3">
-    </fieldset>
-
-    <label for="seed">Seed <span class="muted">(optional, makes the same packs reproducible)</span></label>
-    <div class="seed-row">
-      <input id="seed" type="text" placeholder="e.g. friday-night" autocomplete="off">
-      <button id="random-seed" type="button">Random seed</button>
+<body class="layout-fixed sidebar-expand-lg">
+<div class="app-wrapper">
+  <nav class="app-header navbar navbar-expand bg-body">
+    <div class="container-fluid">
+      <ul class="navbar-nav">
+        <li class="nav-item"><a class="nav-link" data-lte-toggle="sidebar" href="#" role="button" aria-label="Toggle sidebar"><i class="bi bi-list"></i></a></li>
+        <li class="nav-item d-none d-md-block"><span class="nav-link fw-bold">MTG Draft</span></li>
+      </ul>
+      <ul class="navbar-nav ms-auto">
+        <li class="nav-item"><button type="button" id="theme-toggle" class="btn btn-sm btn-outline-secondary" aria-label="Toggle dark mode"><i class="bi bi-moon-fill" aria-hidden="true"></i></button></li>
+      </ul>
     </div>
-    <p class="muted">Empty seed means truly random. A filled seed means the same set, pack count, and seed always deal the same packs.</p>
+  </nav>
 
-    <div class="actions">
-      <button id="open-packs" type="button" class="primary">Open packs</button>
-      <button id="clear-pool" type="button">Clear pool</button>
-      <button id="share-link" type="button">Copy share link</button>
+  <aside class="app-sidebar bg-body-secondary shadow" data-bs-theme="dark">
+    <div class="sidebar-brand">
+      <a href="./" class="brand-link"><span class="brand-text fw-light">MTG Draft</span></a>
     </div>
-    <p id="status" class="status" role="status" aria-live="polite"></p>
-    <p class="muted">Classic draft pack: 1 rare or mythic (mythic about 1 in 8), 3 uncommons, 10 commons, 1 land. About 1 pack in 3 has a foil, which replaces a common. Tokens and bonus sheets are excluded.</p>
-  </section>
-
-  <section id="pack-reveal" class="card" hidden>
-    <h2>Open packs</h2>
-    <p id="reveal-progress" class="stats" aria-live="polite"></p>
-    <p class="muted">Click a card to flip it over, or press Space to flip the next one. The rare is last. N = next pack, A = reveal all.</p>
-    <div class="actions">
-      <button id="reveal-all" type="button">Reveal all</button>
-      <button id="reveal-next-pack" type="button">Next pack</button>
-      <button id="reveal-skip" type="button">Skip to pool</button>
+    <div class="sidebar-wrapper">
+      <nav class="mt-2">
+        <ul class="nav sidebar-menu flex-column" role="menu">
+          <li class="nav-header">Steps</li>
+          <li class="nav-item"><a href="#" class="nav-link step-link active" data-step="open"><i class="nav-icon bi bi-box-seam"></i><p>1. Open packs</p></a></li>
+          <li class="nav-item"><a href="#" class="nav-link step-link" data-step="reveal"><i class="nav-icon bi bi-eye"></i><p>2. Pack reveal</p></a></li>
+          <li class="nav-item"><a href="#" class="nav-link step-link" data-step="pool"><i class="nav-icon bi bi-grid"></i><p>3. Pool <span id="badge-pool" class="badge text-bg-secondary ms-1"></span></p></a></li>
+          <li class="nav-item"><a href="#" class="nav-link step-link" data-step="board"><i class="nav-icon bi bi-kanban"></i><p>4. Deck builder <span id="badge-board" class="badge text-bg-secondary ms-1"></span></p></a></li>
+          <li class="nav-item"><a href="#" class="nav-link step-link" data-step="export"><i class="nav-icon bi bi-download"></i><p>5. Export</p></a></li>
+          <li class="nav-header">Info</li>
+          <li class="nav-item"><a href="#" class="nav-link step-link" data-step="how"><i class="nav-icon bi bi-question-circle"></i><p>How it works</p></a></li>
+        </ul>
+      </nav>
     </div>
-    <div id="reveal-grid" class="grid" aria-live="polite"></div>
-  </section>
+  </aside>
 
-  <section id="results" class="card" hidden>
-    <h2>Your pool</h2>
-    <p id="pool-stats" class="stats" aria-live="polite"></p>
-    <p id="ratings-status" class="muted" aria-live="polite"></p>
-    <div id="pool-curve" class="curve" aria-label="Mana curve for the pool"></div>
-    <p id="pool-colors" class="muted" aria-live="polite"></p>
-
-    <div class="filters">
-      <label for="filter-query">Search
-        <input id="filter-query" type="search" placeholder="Name, type, or rules text">
-      </label>
-      <label for="filter-rarity">Rarity
-        <select id="filter-rarity">
-          <option value="">All rarities</option>
-          <option value="mythic">Mythic</option>
-          <option value="rare">Rare</option>
-          <option value="uncommon">Uncommon</option>
-          <option value="common">Common</option>
-        </select>
-      </label>
-      <label for="filter-color">Color
-        <select id="filter-color">
-          <option value="">All colors</option>
-          <option value="W">White</option>
-          <option value="U">Blue</option>
-          <option value="B">Black</option>
-          <option value="R">Red</option>
-          <option value="G">Green</option>
-          <option value="M">Multicolor</option>
-          <option value="C">Colorless</option>
-        </select>
-      </label>
-      <label for="filter-type">Type
-        <select id="filter-type">
-          <option value="">All types</option>
-          <option value="Creature">Creature</option>
-          <option value="Instant">Instant</option>
-          <option value="Sorcery">Sorcery</option>
-          <option value="Enchantment">Enchantment</option>
-          <option value="Artifact">Artifact</option>
-          <option value="Planeswalker">Planeswalker</option>
-          <option value="Land">Land</option>
-        </select>
-      </label>
-      <label for="sort-select">Sort by
-        <select id="sort-select">
-          <option value="pack">Pack order</option>
-          <option value="name">Name</option>
-          <option value="rarity">Rarity</option>
-          <option value="cmc">Mana value</option>
-          <option value="color">Color</option>
-          <option value="type">Type</option>
-          <option value="price">Price (high to low)</option>
-          <option value="rating">Draft rating (17Lands)</option>
-          <option value="number">Collector number</option>
-        </select>
-      </label>
-      <label for="view-select">View
-        <select id="view-select">
-          <option value="grid">Card images</option>
-          <option value="list">List</option>
-          <option value="groups">Grouped by color</option>
-        </select>
-      </label>
-    </div>
-
-    <div class="actions">
-      <button id="copy-decklist" type="button">Copy decklist</button>
-      <button id="download-txt" type="button">Download .txt</button>
-      <button id="download-csv" type="button">Download .csv</button>
-      <button id="download-json" type="button">Download .json</button>
-      <button id="download-tts" type="button">Download TTS .json</button>
-    </div>
-    <label class="check">
-      <input id="tts-proxy" type="checkbox" checked>
-      TTS image proxy (wsrv.nl, as JPEG) — on for Tabletop Simulator, which has repeatedly failed to load direct Scryfall / WebP images
-    </label>
-    <p class="muted">Decklist format is one line per card: count, then name. The CSV and JSON carry set, collector number, rarity, type, mana value, colors, and price. The TTS file is a Saved Object: a bag holding your pool deck, a tokens deck, and a basic-land pack. Copy it to Documents/My Games/Tabletop Simulator/Saves/Saved Objects, then load it from Objects &gt; Saved Objects in game. Double-faced cards flip to their back face.</p>
-
-    <div id="pool-grid" class="grid" aria-live="polite"></div>
-    <p id="empty-note" class="muted" hidden>No cards match these filters.</p>
-  </section>
-
-  <section id="board-section" class="card" hidden>
-    <h2>Deck builder</h2>
-    <p id="board-status" class="stats" aria-live="polite"></p>
-    <p class="muted">Drag cards between columns, or open a card and use its Move to buttons. Lands in your pool stay in the pool — basic lands are unlimited in limited, so add them by count below instead.</p>
-
-    <div class="board-controls">
-      <label for="board-target">Main deck target
-        <input id="board-target" type="number" min="20" max="100" value="40">
-      </label>
-      <label for="board-sort">Sort board by
-        <select id="board-sort">
-          <option value="cmc">Mana value</option>
-          <option value="name">Name</option>
-          <option value="rarity">Rarity</option>
-          <option value="color">Color</option>
-        </select>
-      </label>
-      <button id="board-reset" type="button">Reset board</button>
-      <button id="bulk-creatures" type="button">Add all creatures to Main</button>
-      <label for="bulk-color">Add one color to Main
-        <select id="bulk-color">
-          <option value="W">White</option>
-          <option value="U">Blue</option>
-          <option value="B">Black</option>
-          <option value="R">Red</option>
-          <option value="G">Green</option>
-        </select>
-      </label>
-      <button id="bulk-color-add" type="button">Add that color to Main</button>
-    </div>
-
-    <div id="board-stats">
-      <div id="board-curve" class="curve" aria-label="Mana curve for the main deck"></div>
-      <p id="board-colors" class="muted" aria-live="polite"></p>
-    </div>
-
-    <div id="board-lands">
-      <h3>Basic lands (add by count)</h3>
-      <div class="land-row" data-land="Plains">
-        <span>Plains</span>
-        <button type="button" class="land-btn" data-land="Plains" data-delta="-1" aria-label="Remove a Plains">−</button>
-        <span id="land-count-Plains">0</span>
-        <button type="button" class="land-btn" data-land="Plains" data-delta="1" aria-label="Add a Plains">+</button>
-      </div>
-      <div class="land-row" data-land="Island">
-        <span>Island</span>
-        <button type="button" class="land-btn" data-land="Island" data-delta="-1" aria-label="Remove an Island">−</button>
-        <span id="land-count-Island">0</span>
-        <button type="button" class="land-btn" data-land="Island" data-delta="1" aria-label="Add an Island">+</button>
-      </div>
-      <div class="land-row" data-land="Swamp">
-        <span>Swamp</span>
-        <button type="button" class="land-btn" data-land="Swamp" data-delta="-1" aria-label="Remove a Swamp">−</button>
-        <span id="land-count-Swamp">0</span>
-        <button type="button" class="land-btn" data-land="Swamp" data-delta="1" aria-label="Add a Swamp">+</button>
-      </div>
-      <div class="land-row" data-land="Mountain">
-        <span>Mountain</span>
-        <button type="button" class="land-btn" data-land="Mountain" data-delta="-1" aria-label="Remove a Mountain">−</button>
-        <span id="land-count-Mountain">0</span>
-        <button type="button" class="land-btn" data-land="Mountain" data-delta="1" aria-label="Add a Mountain">+</button>
-      </div>
-      <div class="land-row" data-land="Forest">
-        <span>Forest</span>
-        <button type="button" class="land-btn" data-land="Forest" data-delta="-1" aria-label="Remove a Forest">−</button>
-        <span id="land-count-Forest">0</span>
-        <button type="button" class="land-btn" data-land="Forest" data-delta="1" aria-label="Add a Forest">+</button>
+  <main class="app-main">
+    <div class="app-content-header">
+      <div class="container-fluid">
+        <div class="row">
+          <div class="col-sm-12">
+            <h3 class="mb-0" id="step-title">Open packs</h3>
+            <p class="text-secondary mb-0" id="step-subtitle">Solo pack opener. Pick a set, open packs, sort the pool, export it.</p>
+          </div>
+        </div>
       </div>
     </div>
+    <div class="app-content">
+      <div class="container-fluid">
 
-    <div class="board-columns">
-      <div class="board-column">
-        <h3>Pool <span id="board-count-pool"></span></h3>
-        <div id="board-pool" class="board-zone" data-zone="pool"></div>
-      </div>
-      <div class="board-column">
-        <h3>Main Deck <span id="board-count-main"></span></h3>
-        <div id="board-main" class="board-zone" data-zone="main"></div>
-      </div>
-      <div class="board-column">
-        <h3>Sideboard <span id="board-count-sideboard"></span></h3>
-        <div id="board-sideboard" class="board-zone" data-zone="sideboard"></div>
-      </div>
-      <div class="board-column">
-        <h3>Maybeboard <span id="board-count-maybe"></span></h3>
-        <div id="board-maybe" class="board-zone" data-zone="maybe"></div>
+        <section class="step-panel card" id="step-open" data-step-panel="open">
+          <div class="card-header"><h3 class="card-title">Open packs</h3></div>
+          <div class="card-body">
+            <label for="set-search">Set</label>
+            <input id="set-search" type="search" placeholder="Search sets, e.g. Bloomburrow or blb" autocomplete="off">
+            <select id="set-select" aria-label="Choose a set">
+              <option value="">Loading sets from Scryfall&hellip;</option>
+            </select>
+            <p id="set-info" class="muted" aria-live="polite"></p>
+
+            <fieldset>
+              <legend>Packs</legend>
+              <div class="presets" role="group" aria-label="Pack presets">
+                <button type="button" class="preset" data-packs="1">1 pack</button>
+                <button type="button" class="preset" data-packs="3">3 packs (draft)</button>
+                <button type="button" class="preset" data-packs="6">6 packs (sealed)</button>
+              </div>
+              <label for="pack-count">Custom pack count (1&ndash;36)</label>
+              <input id="pack-count" type="number" min="1" max="36" value="3">
+            </fieldset>
+
+            <label for="seed">Seed <span class="muted">(optional, makes the same packs reproducible)</span></label>
+            <div class="seed-row">
+              <input id="seed" type="text" placeholder="e.g. friday-night" autocomplete="off">
+              <button id="random-seed" type="button">Random seed</button>
+            </div>
+            <p class="muted">Empty seed means truly random. A filled seed means the same set, pack count, and seed always deal the same packs.</p>
+
+            <div class="actions">
+              <button id="open-packs" type="button" class="primary">Open packs</button>
+              <button id="clear-pool" type="button">Clear pool</button>
+              <button id="share-link" type="button">Copy share link</button>
+            </div>
+            <p id="status" class="status" role="status" aria-live="polite"></p>
+            <p class="muted">Classic draft pack: 1 rare or mythic (mythic about 1 in 8), 3 uncommons, 10 commons, 1 land. About 1 pack in 3 has a foil, which replaces a common. Tokens and bonus sheets are excluded.</p>
+          </div>
+          <div class="card-footer d-flex justify-content-end">
+            <button type="button" class="btn btn-primary step-next" data-goto="reveal">Next: Pack reveal</button>
+          </div>
+        </section>
+
+        <section class="step-panel card" id="step-reveal" data-step-panel="reveal" hidden>
+          <div class="card-header"><h3 class="card-title">Pack reveal</h3></div>
+          <div class="card-body">
+            <div id="pack-reveal">
+              <p id="reveal-progress" class="stats" aria-live="polite"></p>
+              <p class="muted">Click a card to flip it over, or press Space to flip the next one. The rare is last. N = next pack, A = reveal all.</p>
+              <div class="actions">
+                <button id="reveal-all" type="button">Reveal all</button>
+                <button id="reveal-next-pack" type="button">Next pack</button>
+                <button id="reveal-skip" type="button">Skip to pool</button>
+              </div>
+              <div id="reveal-grid" class="grid" aria-live="polite"></div>
+            </div>
+          </div>
+          <div class="card-footer d-flex justify-content-between">
+            <button type="button" class="btn btn-outline-secondary step-prev" data-goto="open">Back: Open packs</button>
+            <button type="button" class="btn btn-primary step-next" data-goto="pool">Next: Pool</button>
+          </div>
+        </section>
+
+        <section class="step-panel card" id="step-pool" data-step-panel="pool" hidden>
+          <div class="card-header"><h3 class="card-title">Your pool</h3></div>
+          <div class="card-body">
+            <div id="results">
+              <p id="pool-stats" class="stats" aria-live="polite"></p>
+              <p id="ratings-status" class="muted" aria-live="polite"></p>
+              <div id="pool-curve" class="curve" aria-label="Mana curve for the pool"></div>
+              <p id="pool-colors" class="muted" aria-live="polite"></p>
+
+              <div class="filters">
+                <label for="filter-query">Search
+                  <input id="filter-query" type="search" placeholder="Name, type, or rules text">
+                </label>
+                <label for="filter-rarity">Rarity
+                  <select id="filter-rarity">
+                    <option value="">All rarities</option>
+                    <option value="mythic">Mythic</option>
+                    <option value="rare">Rare</option>
+                    <option value="uncommon">Uncommon</option>
+                    <option value="common">Common</option>
+                  </select>
+                </label>
+                <label for="filter-color">Color
+                  <select id="filter-color">
+                    <option value="">All colors</option>
+                    <option value="W">White</option>
+                    <option value="U">Blue</option>
+                    <option value="B">Black</option>
+                    <option value="R">Red</option>
+                    <option value="G">Green</option>
+                    <option value="M">Multicolor</option>
+                    <option value="C">Colorless</option>
+                  </select>
+                </label>
+                <label for="filter-type">Type
+                  <select id="filter-type">
+                    <option value="">All types</option>
+                    <option value="Creature">Creature</option>
+                    <option value="Instant">Instant</option>
+                    <option value="Sorcery">Sorcery</option>
+                    <option value="Enchantment">Enchantment</option>
+                    <option value="Artifact">Artifact</option>
+                    <option value="Planeswalker">Planeswalker</option>
+                    <option value="Land">Land</option>
+                  </select>
+                </label>
+                <label for="sort-select">Sort by
+                  <select id="sort-select">
+                    <option value="pack">Pack order</option>
+                    <option value="name">Name</option>
+                    <option value="rarity">Rarity</option>
+                    <option value="cmc">Mana value</option>
+                    <option value="color">Color</option>
+                    <option value="type">Type</option>
+                    <option value="price">Price (high to low)</option>
+                    <option value="rating">Draft rating (17Lands)</option>
+                    <option value="number">Collector number</option>
+                  </select>
+                </label>
+                <label for="view-select">View
+                  <select id="view-select">
+                    <option value="grid">Card images</option>
+                    <option value="list">List</option>
+                    <option value="groups">Grouped by color</option>
+                  </select>
+                </label>
+              </div>
+
+              <div id="pool-grid" class="grid" aria-live="polite"></div>
+              <p id="empty-note" class="muted" hidden>No cards match these filters.</p>
+            </div>
+          </div>
+          <div class="card-footer d-flex justify-content-between">
+            <button type="button" class="btn btn-outline-secondary step-prev" data-goto="reveal">Back: Pack reveal</button>
+            <button type="button" class="btn btn-primary step-next" data-goto="board">Next: Deck builder</button>
+          </div>
+        </section>
+
+        <section class="step-panel card" id="step-board" data-step-panel="board" hidden>
+          <div class="card-header"><h3 class="card-title">Deck builder</h3></div>
+          <div class="card-body">
+            <div id="board-section">
+              <p id="board-status" class="stats" aria-live="polite"></p>
+              <p class="muted">Drag cards between columns, or open a card and use its Move to buttons. Lands in your pool stay in the pool — basic lands are unlimited in limited, so add them by count below instead.</p>
+
+              <div class="board-controls">
+                <label for="board-target">Main deck target
+                  <input id="board-target" type="number" min="20" max="100" value="40">
+                </label>
+                <label for="board-sort">Sort board by
+                  <select id="board-sort">
+                    <option value="cmc">Mana value</option>
+                    <option value="name">Name</option>
+                    <option value="rarity">Rarity</option>
+                    <option value="color">Color</option>
+                  </select>
+                </label>
+                <button id="board-reset" type="button">Reset board</button>
+                <button id="bulk-creatures" type="button">Add all creatures to Main</button>
+                <label for="bulk-color">Add one color to Main
+                  <select id="bulk-color">
+                    <option value="W">White</option>
+                    <option value="U">Blue</option>
+                    <option value="B">Black</option>
+                    <option value="R">Red</option>
+                    <option value="G">Green</option>
+                  </select>
+                </label>
+                <button id="bulk-color-add" type="button">Add that color to Main</button>
+              </div>
+
+              <div id="board-stats">
+                <div id="board-curve" class="curve" aria-label="Mana curve for the main deck"></div>
+                <p id="board-colors" class="muted" aria-live="polite"></p>
+              </div>
+
+              <div id="board-lands">
+                <h3>Basic lands (add by count)</h3>
+                <div class="land-row" data-land="Plains">
+                  <span>Plains</span>
+                  <button type="button" class="land-btn" data-land="Plains" data-delta="-1" aria-label="Remove a Plains">−</button>
+                  <span id="land-count-Plains">0</span>
+                  <button type="button" class="land-btn" data-land="Plains" data-delta="1" aria-label="Add a Plains">+</button>
+                </div>
+                <div class="land-row" data-land="Island">
+                  <span>Island</span>
+                  <button type="button" class="land-btn" data-land="Island" data-delta="-1" aria-label="Remove an Island">−</button>
+                  <span id="land-count-Island">0</span>
+                  <button type="button" class="land-btn" data-land="Island" data-delta="1" aria-label="Add an Island">+</button>
+                </div>
+                <div class="land-row" data-land="Swamp">
+                  <span>Swamp</span>
+                  <button type="button" class="land-btn" data-land="Swamp" data-delta="-1" aria-label="Remove a Swamp">−</button>
+                  <span id="land-count-Swamp">0</span>
+                  <button type="button" class="land-btn" data-land="Swamp" data-delta="1" aria-label="Add a Swamp">+</button>
+                </div>
+                <div class="land-row" data-land="Mountain">
+                  <span>Mountain</span>
+                  <button type="button" class="land-btn" data-land="Mountain" data-delta="-1" aria-label="Remove a Mountain">−</button>
+                  <span id="land-count-Mountain">0</span>
+                  <button type="button" class="land-btn" data-land="Mountain" data-delta="1" aria-label="Add a Mountain">+</button>
+                </div>
+                <div class="land-row" data-land="Forest">
+                  <span>Forest</span>
+                  <button type="button" class="land-btn" data-land="Forest" data-delta="-1" aria-label="Remove a Forest">−</button>
+                  <span id="land-count-Forest">0</span>
+                  <button type="button" class="land-btn" data-land="Forest" data-delta="1" aria-label="Add a Forest">+</button>
+                </div>
+              </div>
+
+              <div class="board-columns">
+                <div class="board-column">
+                  <h3>Pool <span id="board-count-pool"></span></h3>
+                  <div id="board-pool" class="board-zone" data-zone="pool"></div>
+                </div>
+                <div class="board-column">
+                  <h3>Main Deck <span id="board-count-main"></span></h3>
+                  <div id="board-main" class="board-zone" data-zone="main"></div>
+                </div>
+                <div class="board-column">
+                  <h3>Sideboard <span id="board-count-sideboard"></span></h3>
+                  <div id="board-sideboard" class="board-zone" data-zone="sideboard"></div>
+                </div>
+                <div class="board-column">
+                  <h3>Maybeboard <span id="board-count-maybe"></span></h3>
+                  <div id="board-maybe" class="board-zone" data-zone="maybe"></div>
+                </div>
+              </div>
+              <p class="muted">Exports use your Main Deck + Sideboard (plus added lands) once you start building; otherwise they export the whole pool. Your board is saved in this browser for this set, pack count, and seed.</p>
+            </div>
+          </div>
+          <div class="card-footer d-flex justify-content-between">
+            <button type="button" class="btn btn-outline-secondary step-prev" data-goto="pool">Back: Pool</button>
+            <button type="button" class="btn btn-primary step-next" data-goto="export">Next: Export</button>
+          </div>
+        </section>
+
+        <section class="step-panel card" id="step-export" data-step-panel="export" hidden>
+          <div class="card-header"><h3 class="card-title">Export</h3></div>
+          <div class="card-body">
+            <div class="actions">
+              <button id="copy-decklist" type="button">Copy decklist</button>
+              <button id="download-txt" type="button">Download .txt</button>
+              <button id="download-csv" type="button">Download .csv</button>
+              <button id="download-json" type="button">Download .json</button>
+              <button id="download-tts" type="button">Download TTS .json</button>
+            </div>
+            <label class="check">
+              <input id="tts-proxy" type="checkbox" checked>
+              TTS image proxy (wsrv.nl, as JPEG) — on for Tabletop Simulator, which has repeatedly failed to load direct Scryfall / WebP images
+            </label>
+            <p class="muted">Decklist format is one line per card: count, then name. The CSV and JSON carry set, collector number, rarity, type, mana value, colors, and price. The TTS file is a Saved Object: a bag holding your pool deck, a tokens deck, and a basic-land pack. Copy it to Documents/My Games/Tabletop Simulator/Saves/Saved Objects, then load it from Objects &gt; Saved Objects in game. Double-faced cards flip to their back face.</p>
+            <p class="muted">Once you start building on the Deck builder step, exports describe your Main Deck + Sideboard (plus added lands); otherwise they export the whole pool.</p>
+          </div>
+          <div class="card-footer d-flex justify-content-between">
+            <button type="button" class="btn btn-outline-secondary step-prev" data-goto="board">Back: Deck builder</button>
+            <button type="button" class="btn btn-primary step-next" data-goto="how">How it works</button>
+          </div>
+        </section>
+
+        <section class="step-panel card" id="step-how" data-step-panel="how" hidden>
+          <div class="card-header"><h3 class="card-title">How packs are built</h3></div>
+          <div class="card-body">
+            <ul>
+              <li>The set's card pool is fetched once from Scryfall, then cached in your browser for 24 hours. Scryfall asks for at most 2 card requests per second, so the first load of a set takes a few seconds while pages load.</li>
+              <li>Each pack is dealt without replacement from that pool, so no card repeats inside one pack. Copies can repeat across packs, as in real sealed.</li>
+              <li>Sorting and filtering happen locally on the cards you already have. No new request is made when you change a sort or filter.</li>
+              <li>Draft ratings come from 17Lands Premier Draft data (games-in-hand win rate, average last seen, improvement over baseline). 17Lands only publishes live ratings for the current draft format, so older sets show no ratings rather than guessed numbers. Ratings are cached for 24 hours.</li>
+              <li>Card data and images are from Scryfall. TCGplayer and CardMarket pricing were not added: Scryfall's USD price already comes from TCGplayer, and the others need keys for little extra in a draft pool. MTGJSON's per-set booster templates were not added either — the foil slot above is a documented approximation, and the full MTGJSON file is too large to fetch on a static page.</li>
+            </ul>
+          </div>
+          <div class="card-footer d-flex justify-content-start">
+            <button type="button" class="btn btn-outline-secondary step-prev" data-goto="open">Back to start</button>
+          </div>
+        </section>
+
       </div>
     </div>
-    <p class="muted">Exports use your Main Deck + Sideboard (plus added lands) once you start building; otherwise they export the whole pool. Your board is saved in this browser for this set, pack count, and seed.</p>
-  </section>
+  </main>
 
-  <section class="card">
-    <h2>How packs are built</h2>
-    <ul>
-      <li>The set's card pool is fetched once from Scryfall, then cached in your browser for 24 hours. Scryfall asks for at most 2 card requests per second, so the first load of a set takes a few seconds while pages load.</li>
-      <li>Each pack is dealt without replacement from that pool, so no card repeats inside one pack. Copies can repeat across packs, as in real sealed.</li>
-      <li>Sorting and filtering happen locally on the cards you already have. No new request is made when you change a sort or filter.</li>
-      <li>Draft ratings come from 17Lands Premier Draft data (games-in-hand win rate, average last seen, improvement over baseline). 17Lands only publishes live ratings for the current draft format, so older sets show no ratings rather than guessed numbers. Ratings are cached for 24 hours.</li>
-      <li>Card data and images are from Scryfall. TCGplayer and CardMarket pricing were not added: Scryfall's USD price already comes from TCGplayer, and the others need keys for little extra in a draft pool. MTGJSON's per-set booster templates were not added either — the foil slot above is a documented approximation, and the full MTGJSON file is too large to fetch on a static page.</li>
-    </ul>
-  </section>
-</main>
+  <footer class="app-footer">
+    <p>Unofficial fan project, not affiliated with or endorsed by Wizards of the Coast. Card data and images from <a href="https://scryfall.com/">Scryfall</a>. Magic: The Gathering is a trademark of Wizards of the Coast.</p>
+    <p class="muted">No account, no uploads. Your pool and seed never leave this browser except when you copy a share link or download an export.</p>
+  </footer>
+</div>
 
 <dialog id="card-dialog">
   <form method="dialog">
@@ -265,11 +370,8 @@
   </div>
 </dialog>
 
-<footer>
-  <p>Unofficial fan project, not affiliated with or endorsed by Wizards of the Coast. Card data and images from <a href="https://scryfall.com/">Scryfall</a>. Magic: The Gathering is a trademark of Wizards of the Coast.</p>
-  <p class="muted">No account, no uploads. Your pool and seed never leave this browser except when you copy a share link or download an export.</p>
-</footer>
-
+<script src="assets/vendor/bootstrap.bundle.min.js"></script>
+<script src="assets/vendor/adminlte.min.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -1,6 +1,6 @@
 // Offline shell for MTG Draft. Card data and images still come from
 // Scryfall at runtime; only the app shell is cached here.
-const CACHE = "mtg-draft-v1";
+const CACHE = "mtg-draft-v2";
 const SHELL = [
   "index.html",
   "styles.css",
@@ -9,6 +9,12 @@ const SHELL = [
   "manifest.webmanifest",
   "icons/icon-192.png",
   "icons/icon-512.png",
+  "assets/vendor/bootstrap.min.css",
+  "assets/vendor/bootstrap-icons.min.css",
+  "assets/vendor/adminlte.min.css",
+  "assets/vendor/bootstrap.bundle.min.js",
+  "assets/vendor/adminlte.min.js",
+  "assets/vendor/fonts/bootstrap-icons.woff2",
 ];
 
 self.addEventListener("install", (event) => {

@@ -70,6 +70,54 @@ let ratingsNote = "";
 let revealPackIndex = 0;
 let revealedCards = new Set();
 let justMovedIds = new Set();
+let currentStep = "open";
+const STEP_TITLES = {
+  open: ["Open packs", "Solo pack opener. Pick a set, open packs, sort the pool, export it."],
+  reveal: ["Pack reveal", "One pack at a time, cards face-down, rare last."],
+  pool: ["Your pool", "Sort, filter, and group the cards you opened."],
+  board: ["Deck builder", "Build a 40-card deck from your pool."],
+  export: ["Export", "Decklist, CSV, JSON, or Tabletop Simulator."],
+  how: ["How it works", "How packs are built, and where the data comes from."],
+};
+const STEPS_REQUIRING_POOL = new Set(["reveal", "pool", "board", "export"]);
+
+function updateStepBadges() {
+  const poolBadge = $("badge-pool");
+  if (poolBadge) poolBadge.textContent = flatPool.length > 0 ? String(flatPool.length) : "";
+  const boardBadge = $("badge-board");
+  if (boardBadge) {
+    if (!board) {
+      boardBadge.textContent = "";
+    } else {
+      const counts = boardCounts(board);
+      boardBadge.textContent = `${counts.mainTotal}/${boardTarget()}`;
+    }
+  }
+}
+
+function showStep(step) {
+  if (STEPS_REQUIRING_POOL.has(step) && flatPool.length === 0) {
+    setStatus("Open packs first — that step needs a pool.");
+    return false;
+  }
+  currentStep = step;
+  for (const panel of document.querySelectorAll("[data-step-panel]")) {
+    panel.hidden = panel.dataset.stepPanel !== step;
+  }
+  for (const link of document.querySelectorAll(".step-link")) {
+    link.classList.toggle("active", link.dataset.step === step);
+  }
+  const [title, subtitle] = STEP_TITLES[step] || ["MTG Draft", ""];
+  $("step-title").textContent = title;
+  $("step-subtitle").textContent = subtitle;
+  window.scrollTo({ top: 0 });
+  return true;
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-bs-theme", theme);
+  try { localStorage.setItem("mtg-theme", theme); } catch { /* ignore */ }
+}
 
 function setStatus(text) {
   $("status").textContent = text;
@@ -222,6 +270,7 @@ function boardTarget() {
 function renderBoard() {
   if (!board) return;
   $("board-section").hidden = false;
+  updateStepBadges();
   const counts = boardCounts(board);
   const status = boardStatus(board, boardTarget());
   $("board-status").textContent =
@@ -460,10 +509,9 @@ function nextPack() {
 
 function finishReveal() {
   $("pack-reveal").hidden = true;
-  $("results").hidden = flatPool.length === 0;
-  $("board-section").hidden = flatPool.length === 0;
   renderPool();
   renderBoard();
+  showStep("pool");
 }
 
 function currentRng() {
@@ -486,6 +534,7 @@ function renderPool() {
   const visible = visiblePool();
   const section = $("results");
   section.hidden = flatPool.length === 0;
+  updateStepBadges();
   $("empty-note").hidden = visible.length > 0 || flatPool.length === 0;
 
   const totalPrice = flatPool.reduce((sum, card) => sum + (cardPrice(card) || 0), 0);
@@ -640,8 +689,8 @@ async function openPacks() {
     );
     revealPackIndex = 0;
     revealedCards = new Set();
-    $("results").hidden = true;
-    $("board-section").hidden = true;
+    updateStepBadges();
+    showStep("reveal");
     renderReveal();
     fetchRatings(code);
   } catch (error) {
@@ -652,6 +701,21 @@ async function openPacks() {
 }
 
 // --- Wiring ------------------------------------------------------------
+// AdminLTE step panels: sidebar links and Next/Back buttons move between
+// steps; steps that need a pool stay locked until packs are opened.
+for (const link of document.querySelectorAll(".step-link")) {
+  link.addEventListener("click", (event) => {
+    event.preventDefault();
+    showStep(link.dataset.step);
+  });
+}
+for (const button of document.querySelectorAll(".step-next, .step-prev")) {
+  button.addEventListener("click", () => showStep(button.dataset.goto));
+}
+$("theme-toggle").addEventListener("click", () => {
+  const next = document.documentElement.getAttribute("data-bs-theme") === "dark" ? "light" : "dark";
+  applyTheme(next);
+});
 $("set-search").addEventListener("input", (event) => renderSetOptions(event.target.value));
 $("set-select").addEventListener("change", updateSetInfo);
 document.querySelectorAll(".preset").forEach((button) => {
@@ -672,7 +736,7 @@ $("reveal-all").addEventListener("click", () => {
 $("reveal-next-pack").addEventListener("click", nextPack);
 $("reveal-skip").addEventListener("click", finishReveal);
 document.addEventListener("keydown", (event) => {
-  if ($("pack-reveal").hidden) return;
+  if (currentStep !== "reveal" || $("pack-reveal").hidden) return;
   if ($("card-dialog").open) return;
   if (event.target && (event.target.tagName === "INPUT" || event.target.tagName === "SELECT" || event.target.tagName === "TEXTAREA")) return;
   if (event.code === "Space" || event.code === "Enter") {
@@ -702,7 +766,8 @@ $("clear-pool").addEventListener("click", () => {
   ratings = { byName: {}, total: 0, withData: 0, available: false };
   ratingsNote = "";
   $("pack-reveal").hidden = true;
-  $("board-section").hidden = true;
+  updateStepBadges();
+  showStep("open");
   renderPool();
   setStatus("Pool cleared.");
 });

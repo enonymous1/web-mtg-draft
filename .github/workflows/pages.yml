@@ -29,9 +29,11 @@ jobs:
       - run: python -m unittest discover -s tests -p "test_*.py" -v
       - name: Assemble Pages artifact (site files only)
         run: |
-          mkdir -p dist/icons
+          mkdir -p dist/icons dist/assets/vendor/fonts
           cp index.html styles.css app.js logic.js sw.js manifest.webmanifest .nojekyll dist/
           cp icons/icon-192.png icons/icon-512.png dist/icons/
+          cp assets/vendor/*.css assets/vendor/*.js assets/vendor/*.md dist/assets/vendor/
+          cp assets/vendor/fonts/* dist/assets/vendor/fonts/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -32,6 +32,12 @@ class TestStaticSite(unittest.TestCase):
             Path("icons") / "icon-512.png",
             Path("LICENSE"),
             Path("README.md"),
+            Path("assets") / "vendor" / "adminlte.min.css",
+            Path("assets") / "vendor" / "adminlte.min.js",
+            Path("assets") / "vendor" / "bootstrap.min.css",
+            Path("assets") / "vendor" / "bootstrap.bundle.min.js",
+            Path("assets") / "vendor" / "bootstrap-icons.min.css",
+            Path("assets") / "vendor" / "THIRD_PARTY_NOTICES.md",
         ]
         for rel in required:
             with self.subTest(rel=rel):
@@ -61,8 +67,15 @@ class TestStaticSite(unittest.TestCase):
 
     def test_service_worker_caches_every_shell_file(self):
         sw = (ROOT / "sw.js").read_text(encoding="utf-8")
-        for name in ("index.html", "styles.css", "app.js", "logic.js", "manifest.webmanifest"):
+        for name in ("index.html", "styles.css", "app.js", "logic.js", "manifest.webmanifest",
+                     "assets/vendor/adminlte.min.css", "assets/vendor/adminlte.min.js",
+                     "assets/vendor/bootstrap.min.css", "assets/vendor/bootstrap.bundle.min.js"):
             self.assertIn(name, sw, name)
+
+    def test_pages_workflow_deploys_vendor_assets(self):
+        workflow = (ROOT / ".github" / "workflows" / "pages.yml").read_text(encoding="utf-8")
+        self.assertIn("assets/vendor", workflow)
+        self.assertIn("dist/assets/vendor", workflow)
 
     def test_index_wires_the_opener_controls(self):
         html = (ROOT / "index.html").read_text(encoding="utf-8")
@@ -77,6 +90,9 @@ class TestStaticSite(unittest.TestCase):
             "pack-reveal", "reveal-progress", "reveal-grid",
             "reveal-all", "reveal-next-pack", "reveal-skip",
             "ratings-status", "pool-curve", "pool-colors",
+            "step-open", "step-reveal", "step-pool", "step-board",
+            "step-export", "step-how", "step-title", "step-subtitle",
+            "theme-toggle", "badge-pool", "badge-board",
             "board-section", "board-status", "board-target", "board-sort",
             "board-reset", "bulk-creatures", "bulk-color", "bulk-color-add",
             "board-curve", "board-colors",
@@ -108,6 +124,9 @@ class TestStaticSite(unittest.TestCase):
         self.assertIn("17lands.com/card_ratings/data", app)
         self.assertIn("renderReveal", app)
         self.assertIn("groupPoolByColor", app)
+        self.assertIn("showStep", app)
+        self.assertIn("updateStepBadges", app)
+        self.assertIn("applyTheme", app)
         self.assertIn("renderBoard", app)
         self.assertIn("flip-inner", app)
         self.assertIn("justMovedIds", app)
